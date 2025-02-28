@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["sensor-board"]
+members = ["node-board", "sensor-board"]
 
 [profile.dev]
 # Rust debug is too slow.
