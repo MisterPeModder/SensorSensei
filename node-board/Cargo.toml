@@ -1,0 +1,23 @@
+[package]
+edition = "2021"
+name = "node-board"
+version = "0.1.0"
+
+[[bin]]
+name = "node-board"
+path = "./src/bin/main.rs"
+
+[dependencies]
+critical-section = "1.2.0"
+esp-alloc = { version = "0.6.0" }
+esp-backtrace = { version = "0.15.0", features = [
+  "esp32s3",
+  "exception-handler",
+  "panic-handler",
+  "println",
+] }
+esp-hal = { version = "0.23.1", features = ["esp32s3"] }
+esp-println = { version = "0.13.0", features = ["esp32s3", "log"] }
+log = { version = "0.4.21" }
+# Needed by esp-hal (or else it won't resolve)
+esp-synopsys-usb-otg = { version = "0.4.2", features = ["fs", "esp32sx"] }
