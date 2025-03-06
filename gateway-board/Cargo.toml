@@ -1,10 +1,10 @@
 [package]
 edition = "2021"
-name = "node-board"
+name = "gateway-board"
 version = "0.1.0"
 
 [[bin]]
-name = "node-board"
+name = "gateway-board"
 path = "./src/bin/main.rs"
 
 [dependencies]
@@ -21,3 +21,17 @@ esp-println = { version = "0.13.0", features = ["esp32s3", "log"] }
 log = { version = "0.4.21" }
 # Needed by esp-hal (or else it won't resolve)
 esp-synopsys-usb-otg = { version = "0.4.2", features = ["fs", "esp32sx"] }
+
+[profile.dev]
+# Rust debug is too slow.
+# For debug builds always builds with some optimization
+opt-level = "s"
+
+[profile.release]
+codegen-units = 1        # LLVM can perform better optimizations using a single thread
+debug = 2
+debug-assertions = false
+incremental = false
+lto = 'fat'
+opt-level = 's'
+overflow-checks = false
