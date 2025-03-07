@@ -44,6 +44,8 @@ jobs:
 
       - name: Enable caching
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: gateway-board
 
       - name: Run command
         run: cargo ${{ matrix.action.command }} ${{ matrix.action.args }}
