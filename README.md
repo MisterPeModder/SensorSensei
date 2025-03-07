@@ -36,4 +36,9 @@ cargo run --release
 
 ### Sensor Board
 
-_TODO_
+Build:
+
+```shell
+cd sensor-board
+pio run -e esp32dev_fr
+```
