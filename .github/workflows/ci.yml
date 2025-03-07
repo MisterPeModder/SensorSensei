@@ -20,7 +20,7 @@ env:
 jobs:
   rust-checks:
     name: Rust Checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -34,14 +34,40 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Setup Rust
         uses: esp-rs/xtensa-toolchain@v1.5
         with:
           default: true
           buildtargets: esp32
           ldproxy: false
+
       - name: Enable caching
         uses: Swatinem/rust-cache@v2
+
       - name: Run command
         run: cargo ${{ matrix.action.command }} ${{ matrix.action.args }}
         working-directory: gateway-board
+
+  platformio-checks:
+    name: PlatformIO Checks
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install APT dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libbsd-dev
+
+      - name: Install PlatformIO Core
+        run: pip install --upgrade platformio
+
+      - name: Build PlatformIO esp32dev_fr
+        run: pio run --environment esp32dev_fr
+        working-directory: sensor-board
