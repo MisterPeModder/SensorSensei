@@ -1,0 +1,35 @@
+@startuml IoT902-ActDiag-GatewayBoard
+
+legend
+    | | Legend |
+    | ""⸱⸱⸱⸱⸱>"" | Action that can take time \n and retry on timeout|
+    | ""-->""  | Action that can take \n unknown amount of time|
+endlegend
+
+
+group GatewayBoard
+    start
+        :Init;
+        if (Init conditions fulfilled) then (//false//)
+            :Init Error;
+            stop
+        else (//true//)
+        endif
+    fork
+        repeat
+        :Wait for data;
+        -[#black,dashed]->
+        :Receive data;
+        :Send to Server;
+        -[#black,dotted]->;
+        repeat while(Wait for ACK);
+        detach
+    fork again
+        repeat
+        :Wait new board to subscribe;
+        -[#black,dashed]->
+        repeat while(Add board);
+        detach
+    end fork
+    detach
+@enduml

@@ -1,0 +1,30 @@
+@startuml IoT902-ActDiag-SensorBoard
+
+legend
+    | | Legend |
+    | ""⸱⸱⸱⸱⸱>"" | Action that can take time \n and retry on timeout|
+    | ""-->""  | Action that can take \n unknown amount of time|
+endlegend
+
+
+group SensorBoard
+    start
+        :Subscribe to Gateway;
+        -[#black,dotted]->
+        :Wait for ACK;
+        if (Init conditions fulfilled) then (//false//)
+            :Init Error;
+            stop
+        else (//true//)
+        endif
+    repeat
+    :Send data to API;
+    -[#black,dotted]->
+    :Wait for ACK;
+    :Sleep;
+    -[#black,dashed]->
+    repeat while(Wake up from clock);
+    detach
+end group
+
+@enduml
