@@ -16,13 +16,16 @@ espup install
 
 ## Building
 
-### Gateway Board
+### Gateway and Sensor Boards
+
+Both boards are using cargo and can be built/runned with the same commands. The only difference being in the appropriate directory.
 
 Build:
 
 ```shell
 source ~/export-esp.sh
 cd gateway-board
+# or cd sensor-board
 cargo build --release
 ```
 
@@ -31,14 +34,6 @@ Build and flash:
 ```shell
 source ~/export-esp.sh
 cd gateway-board
+# or cd sensor-board
 cargo run --release
-```
-
-### Sensor Board
-
-Build:
-
-```shell
-cd sensor-board
-pio run -e esp32dev_fr
 ```
