@@ -8,19 +8,22 @@ name = "gateway-board"
 path = "./src/bin/main.rs"
 
 [dependencies]
-critical-section = "1.2.0"
-esp-alloc = { version = "0.6.0" }
+esp-hal = { version = "1.0.0-beta.0", features = ["esp32s3", "unstable"] }
 esp-backtrace = { version = "0.15.0", features = [
   "esp32s3",
   "exception-handler",
   "panic-handler",
   "println",
 ] }
-esp-hal = { version = "0.23.1", features = ["esp32s3"] }
 esp-println = { version = "0.13.0", features = ["esp32s3", "log"] }
+embassy-executor = { version = "0.7.0", features = ["task-arena-size-20480"] }
+embassy-time = { version = "0.4.0", features = ["generic-queue-8"] }
+embassy-sync = "0.6.2"
+embedded-hal-async = "1.0.0"
+embedded-io-async = "0.6.1"
+portable-atomic = "1.11.0"
+esp-hal-embassy = { version = "0.7.0", features = ["esp32s3"] }
 log = { version = "0.4.21" }
-# Needed by esp-hal (or else it won't resolve)
-esp-synopsys-usb-otg = { version = "0.4.2", features = ["fs", "esp32sx"] }
 
 [profile.dev]
 # Rust debug is too slow.
