@@ -19,18 +19,15 @@ env:
 
 jobs:
   rust-checks:
-    name: Rust Checks
+    name: Rust Checks - ${{ matrix.directory }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        action:
-          - command: build
-            args: --release
-          - command: fmt
-            args: --all -- --check --color always
-          - command: clippy
-            args: --all-features -- -D warnings
+        directory:
+          - gateway-board
+          - sensor-board
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -45,31 +42,23 @@ jobs:
       - name: Enable caching
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: gateway-board
+          workspaces: ${{ matrix.directory }}
 
-      - name: Run command
-        run: cargo ${{ matrix.action.command }} ${{ matrix.action.args }}
-        working-directory: gateway-board
+      - name: Cargo Build
+        working-directory: ${{ matrix.directory }}
+        run: cargo build --release || echo "CI_FAILED=true" >> $GITHUB_ENV
 
-  platformio-checks:
-    name: PlatformIO Checks
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Cargo Format
+        working-directory: ${{ matrix.directory }}
+        run: cargo fmt --all -- --check --color always || echo "CI_FAILED=true" >> $GITHUB_ENV
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      - name: Cargo Clippy
+        working-directory: ${{ matrix.directory }}
+        run: cargo clippy --all-features -- -D warnings || echo "CI_FAILED=true" >> $GITHUB_ENV
 
-      - name: Install APT dependencies
+      - name: Final Status Check
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libbsd-dev
-
-      - name: Install PlatformIO Core
-        run: pip install --upgrade platformio
-
-      - name: Build PlatformIO esp32dev_fr
-        run: pio run --environment esp32dev_fr
-        working-directory: sensor-board
+          if [[ "$CI_FAILED" == "true" ]]; then
+            echo "One or more cargo checks failed."
+            exit 1
+          fi
