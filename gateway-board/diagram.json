@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-s3-devkitc-1",
+      "id": "esp",
+      "top": 0.59,
+      "left": 0.67,
+      "attrs": {
+        "flashSize": "16"
+      }
+    },
+    {
+      "type": "board-ssd1306",
+      "id": "oled",
+      "top": 250,
+      "left": 0
+    }
+  ],
+  "connections": [
+    ["esp:TX", "$serialMonitor:RX", "", []],
+    ["esp:RX", "$serialMonitor:TX", "", []],
+    ["esp:17", "oled:SDA", "orange", []],
+    ["esp:18", "oled:SCL", "blue", []],
+    ["esp:5V", "oled:VCC", "red", []],
+    ["esp:GND.1", "oled:GND", "black", []]
+  ],
+  "serialMonitor": {
+    "display": "terminal",
+    "newline": "none",
+    "convertEol": false
+  }
+}

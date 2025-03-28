@@ -37,3 +37,12 @@ cd gateway-board
 # or cd sensor-board
 cargo run --release
 ```
+
+## Simulating (Gateway Board)
+
+You may use Wokwi to simulate the Gateway Board. To do so, follow these steps:
+
+1. Install the Wokwi VSCode extension.
+2. (Re)-build the Gateway Board (see above).
+3. Open the `gateway-board/diagram.json` file in VSCode.
+4. Click on the "Start the simulation" button
