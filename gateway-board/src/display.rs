@@ -1,15 +1,17 @@
 use core::ops::{Deref, DerefMut};
 
 use display_interface::DisplayError;
+use embassy_time::Timer;
 use esp_hal::{
-    gpio::AnyPin,
-    i2c::master::{AnyI2c, ConfigError, I2c},
+    gpio::{GpioPin, Level, Output, OutputConfig},
+    i2c::master::{ConfigError, I2c},
+    peripherals::I2C0,
     time::Rate,
     Async,
 };
 use log::info;
 use ssd1306::{
-    mode::{TerminalMode, TerminalModeError},
+    mode::{DisplayConfig, TerminalMode, TerminalModeError},
     prelude::{DisplayRotation, I2CInterface},
     size::DisplaySize128x64,
     I2CDisplayInterface, Ssd1306,
@@ -22,27 +24,46 @@ type HeltecLora32Display =
 /// Wraps the SSD1306 API for ease of use.
 pub struct GatewayDisplay(HeltecLora32Display);
 
+pub struct GatewayDisplayHardware {
+    pub i2c: I2C0,
+    pub vext: GpioPin<36>,
+    pub sda: GpioPin<17>,
+    pub scl: GpioPin<18>,
+    pub rst: GpioPin<21>,
+}
+
 impl GatewayDisplay {
     pub async fn new(
-        i2c: AnyI2c,
-        sda: AnyPin,
-        scl: AnyPin,
+        hardware: GatewayDisplayHardware,
     ) -> Result<GatewayDisplay, GatewayDisplayError> {
         info!("initializing display...");
+
+        // init power
+        let mut vext = Output::new(hardware.vext, Level::Low, OutputConfig::default());
+        vext.set_low();
+
+        // init screen
+        let mut rst = Output::new(hardware.rst, Level::High, OutputConfig::default());
+        Timer::after_millis(1).await;
+        rst.set_low();
+        Timer::after_millis(1).await;
+        rst.set_high();
 
         // The I2C bus used by the screen is exclusive to it.
         // No need to use mutexes or other synchonization
         let i2c: I2c<'static, Async> = I2c::new(
-            i2c,
+            hardware.i2c,
             esp_hal::i2c::master::Config::default().with_frequency(Rate::from_hz(500000)),
         )?
-        .with_scl(scl)
-        .with_sda(sda)
+        .with_scl(hardware.scl)
+        .with_sda(hardware.sda)
         .into_async();
 
         let interface = I2CDisplayInterface::new(i2c);
-        let inner_display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
-            .into_terminal_mode();
+        let mut inner_display =
+            Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
+                .into_terminal_mode();
+        inner_display.init()?;
 
         Ok(GatewayDisplay(inner_display))
     }
