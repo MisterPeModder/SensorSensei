@@ -46,3 +46,21 @@ You may use Wokwi to simulate the Gateway Board. To do so, follow these steps:
 2. (Re)-build the Gateway Board (see above).
 3. Open the `gateway-board/diagram.json` file in VSCode.
 4. Click on the "Start the simulation" button
+
+## Conditional Compilation (Gateway Board)
+
+### No OLED display
+
+Flashing with wifi support only:
+
+```shell
+cargo run --no-default-features --features="board-heltec-lora32v3,wifi"
+```
+
+### ESP32 support
+
+Flashing with wifi support only:
+
+```shell
+cargo run --target="xtensa-esp32-none-elf" --no-default-features --features="board-esp32dev"
+```
