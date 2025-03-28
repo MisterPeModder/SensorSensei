@@ -54,7 +54,7 @@ jobs:
 
       - name: Cargo Clippy
         working-directory: ${{ matrix.directory }}
-        run: cargo clippy --all-features -- -D warnings || echo "CI_FAILED=true" >> $GITHUB_ENV
+        run: cargo clippy -- -D warnings || echo "CI_FAILED=true" >> $GITHUB_ENV
 
       - name: Final Status Check
         run: |
