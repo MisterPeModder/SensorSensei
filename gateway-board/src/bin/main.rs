@@ -6,8 +6,8 @@ use core::fmt::Write;
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Ticker};
 use esp_backtrace as _;
-use esp_hal::{clock::CpuClock, gpio::AnyPin, i2c::master::AnyI2c, timer::timg::TimerGroup};
-use gateway_board::display::{GatewayDisplay, GatewayDisplayError};
+use esp_hal::{clock::CpuClock, timer::timg::TimerGroup};
+use gateway_board::display::{GatewayDisplay, GatewayDisplayError, GatewayDisplayHardware};
 use log::info;
 use ssd1306::prelude::*;
 
@@ -24,10 +24,8 @@ async fn print_hello() {
 }
 
 #[embassy_executor::task]
-async fn display_things(i2c: AnyI2c, sda: AnyPin, scl: AnyPin) {
-    info!("initializing display...");
-
-    let mut display = GatewayDisplay::new(i2c, sda, scl)
+async fn display_things(hardware: GatewayDisplayHardware) {
+    let mut display = GatewayDisplay::new(hardware)
         .await
         .expect("failed to initialize display");
 
@@ -68,9 +66,11 @@ async fn main(spawner: Spawner) {
     esp_hal_embassy::init(timg0.timer0);
 
     spawner.must_spawn(print_hello());
-    spawner.must_spawn(display_things(
-        peripherals.I2C0.into(),
-        peripherals.GPIO17.into(),
-        peripherals.GPIO18.into(),
-    ));
+    spawner.must_spawn(display_things(GatewayDisplayHardware {
+        i2c: peripherals.I2C0,
+        vext: peripherals.GPIO36,
+        sda: peripherals.GPIO17,
+        scl: peripherals.GPIO18,
+        rst: peripherals.GPIO21,
+    }));
 }
