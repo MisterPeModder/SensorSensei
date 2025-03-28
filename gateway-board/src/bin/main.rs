@@ -1,15 +1,11 @@
 #![no_std]
 #![no_main]
 
-use core::fmt::Write;
-
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Ticker};
 use esp_backtrace as _;
 use esp_hal::{clock::CpuClock, timer::timg::TimerGroup};
-use gateway_board::display::{GatewayDisplay, GatewayDisplayError, GatewayDisplayHardware};
 use log::info;
-use ssd1306::prelude::*;
 
 #[embassy_executor::task]
 async fn print_hello() {
@@ -24,32 +20,9 @@ async fn print_hello() {
 }
 
 #[embassy_executor::task]
-async fn display_things(hardware: GatewayDisplayHardware) {
-    let mut display = GatewayDisplay::new(hardware)
-        .await
-        .expect("failed to initialize display");
-
-    async fn do_display(display: &mut GatewayDisplay) -> Result<(), GatewayDisplayError> {
-        display.set_display_on(true)?;
-
-        display.clear()?;
-        display.set_brightness(Brightness::BRIGHTEST)?;
-        display.set_mirror(false)?;
-
-        writeln!(display, "Hello, World!")?;
-
-        let mut ticker = Ticker::every(Duration::from_millis(100));
-        let mut counter = 0u32;
-
-        loop {
-            display.set_position(0, 2)?;
-            write!(display, "{}.{}", counter / 10, counter % 10)?;
-            counter += 1;
-            ticker.next().await;
-        }
-    }
-
-    do_display(&mut display).await.expect("do_display failure");
+#[cfg(feature = "display-ssd1306")]
+async fn display_things(hardware: gateway_board::display::GatewayDisplayHardware) -> ! {
+    gateway_board::display::display_demo(hardware).await
 }
 
 #[esp_hal_embassy::main]
@@ -66,11 +39,14 @@ async fn main(spawner: Spawner) {
     esp_hal_embassy::init(timg0.timer0);
 
     spawner.must_spawn(print_hello());
-    spawner.must_spawn(display_things(GatewayDisplayHardware {
-        i2c: peripherals.I2C0,
-        vext: peripherals.GPIO36,
-        sda: peripherals.GPIO17,
-        scl: peripherals.GPIO18,
-        rst: peripherals.GPIO21,
-    }));
+    #[cfg(feature = "display-ssd1306")]
+    spawner.must_spawn(display_things(
+        gateway_board::display::GatewayDisplayHardware {
+            i2c: peripherals.I2C0,
+            vext: peripherals.GPIO36,
+            sda: peripherals.GPIO17,
+            scl: peripherals.GPIO18,
+            rst: peripherals.GPIO21,
+        },
+    ));
 }

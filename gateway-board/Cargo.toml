@@ -7,26 +7,31 @@ version = "0.1.0"
 name = "gateway-board"
 path = "./src/bin/main.rs"
 
+[features]
+default = ["display-ssd1306"]
+
+display-ssd1306 = ["display-interface", "ssd1306"]
+
 [dependencies]
-esp-hal = { version = "1.0.0-beta.0", features = ["esp32s3", "unstable"] }
+display-interface = { version = "0.5.0", optional = true }
+embassy-executor = { version = "0.7.0", features = ["task-arena-size-20480"] }
+embassy-sync = "0.6.2"
+embassy-time = { version = "0.4.0" }
+embedded-hal-async = "1.0.0"
+embedded-io-async = "0.6.1"
 esp-backtrace = { version = "0.15.0", features = [
   "esp32s3",
   "exception-handler",
   "panic-handler",
   "println",
 ] }
-esp-println = { version = "0.13.0", features = ["esp32s3", "log"] }
-embassy-executor = { version = "0.7.0", features = ["task-arena-size-20480"] }
-embassy-time = { version = "0.4.0" }
-embassy-sync = "0.6.2"
-embedded-hal-async = "1.0.0"
-embedded-io-async = "0.6.1"
-portable-atomic = "1.11.0"
+esp-hal = { version = "1.0.0-beta.0", features = ["esp32s3", "unstable"] }
 esp-hal-embassy = { version = "0.7.0", features = ["esp32s3"] }
+esp-println = { version = "0.13.0", features = ["esp32s3", "log"] }
 log = { version = "0.4.21" }
-ssd1306 = { version = "0.10.0", features = ["async"] }
-display-interface = "0.5.0"
+portable-atomic = "1.11.0"
 thiserror = { version = "2.0.12", default-features = false }
+ssd1306 = { version = "0.10.0", optional = true, features = ["async"] }
 
 [profile.dev]
 # Rust debug is too slow.
