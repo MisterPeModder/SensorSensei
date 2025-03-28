@@ -4,7 +4,7 @@
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Ticker};
 use esp_backtrace as _;
-use esp_hal::{clock::CpuClock, timer::timg::TimerGroup};
+use esp_hal::clock::CpuClock;
 use log::info;
 
 #[embassy_executor::task]
@@ -35,8 +35,16 @@ async fn main(spawner: Spawner) {
     // wokwi: needed so that the console output is formatted correctly
     esp_println::print!("\x1b[20h");
 
-    let timg0 = TimerGroup::new(peripherals.TIMG0);
-    esp_hal_embassy::init(timg0.timer0);
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "board-esp32dev")] {
+            let timg1 = TimerGroup::new(peripherals.TIMG1);
+            esp_hal_embassy::init(timg1.timer0);
+        } else {
+            use esp_hal::timer::systimer::SystemTimer;
+            let systimer = SystemTimer::new(peripherals.SYSTIMER);
+            esp_hal_embassy::init(systimer.alarm0);
+        }
+    }
 
     spawner.must_spawn(print_hello());
     #[cfg(feature = "display-ssd1306")]
