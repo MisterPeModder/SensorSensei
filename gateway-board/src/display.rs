@@ -1,7 +1,10 @@
-use core::ops::{Deref, DerefMut};
+use core::{
+    fmt::Write,
+    ops::{Deref, DerefMut},
+};
 
 use display_interface::DisplayError;
-use embassy_time::Timer;
+use embassy_time::{Duration, Ticker, Timer};
 use esp_hal::{
     gpio::{GpioPin, Level, Output, OutputConfig},
     i2c::master::{ConfigError, I2c},
@@ -12,7 +15,7 @@ use esp_hal::{
 use log::info;
 use ssd1306::{
     mode::{DisplayConfig, TerminalMode, TerminalModeError},
-    prelude::{DisplayRotation, I2CInterface},
+    prelude::{Brightness, DisplayRotation, I2CInterface},
     size::DisplaySize128x64,
     I2CDisplayInterface, Ssd1306,
 };
@@ -119,4 +122,34 @@ impl From<TerminalModeError> for GatewayDisplayError {
     fn from(value: TerminalModeError) -> Self {
         GatewayDisplayError::TerminalMode(value)
     }
+}
+
+pub async fn display_demo(hardware: GatewayDisplayHardware) -> ! {
+    let mut display = GatewayDisplay::new(hardware)
+        .await
+        .expect("failed to initialize display");
+
+    async fn do_display(display: &mut GatewayDisplay) -> Result<(), GatewayDisplayError> {
+        display.set_display_on(true)?;
+
+        display.clear()?;
+        display.set_brightness(Brightness::BRIGHTEST)?;
+        display.set_mirror(false)?;
+
+        writeln!(display, "Hello, World!")?;
+
+        let mut ticker = Ticker::every(Duration::from_millis(100));
+        let mut counter = 0u32;
+
+        loop {
+            display.set_position(0, 2)?;
+            write!(display, "{}.{}", counter / 10, counter % 10)?;
+            counter += 1;
+            ticker.next().await;
+        }
+    }
+
+    do_display(&mut display).await.expect("do_display failure");
+
+    unreachable!()
 }
