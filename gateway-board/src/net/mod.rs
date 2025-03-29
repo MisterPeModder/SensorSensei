@@ -3,9 +3,12 @@
 use core::net::Ipv4Addr;
 
 mod dhcp;
+mod http;
+mod tcp;
 mod wifi;
 
 pub use dhcp::GatewayDhcpServer;
+pub use http::HttpServer;
 pub use wifi::{init_wifi, WifiController, WifiStackRunners};
 
 use embassy_net::Ipv4Cidr;

@@ -40,6 +40,16 @@ async fn run_net_stack(
 }
 
 #[cfg(feature = "wifi")]
+#[embassy_executor::task]
+async fn run_http(
+    ap_stack: embassy_net::Stack<'static>,
+    sta_stack: embassy_net::Stack<'static>,
+) -> ! {
+    let mut server = gateway_board::net::HttpServer::new(ap_stack, sta_stack, 80).await;
+    server.run().await
+}
+
+#[cfg(feature = "wifi")]
 static ESP_WIFI_CTRL: static_cell::StaticCell<esp_wifi::EspWifiController<'static>> =
     static_cell::StaticCell::new();
 
@@ -122,8 +132,12 @@ async fn setup_wifi(spawner: Spawner, timg0: TIMG0, rng: RNG, radio_clk: RADIO_C
         }
     }
 
+    let ap_stack = wifi_ctrl.ap_stack;
+    let sta_stack = wifi_ctrl.sta_stack;
+
     spawner.must_spawn(run_net_stack(wifi_runners.ap_runner));
     spawner.must_spawn(run_net_stack(wifi_runners.sta_runner));
-    spawner.must_spawn(run_dhcp(wifi_ctrl.ap_stack));
+    spawner.must_spawn(run_dhcp(ap_stack));
     spawner.must_spawn(run_wifi_controller(wifi_ctrl));
+    spawner.must_spawn(run_http(ap_stack, sta_stack));
 }
