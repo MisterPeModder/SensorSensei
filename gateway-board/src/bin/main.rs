@@ -3,8 +3,13 @@
 
 use embassy_executor::Spawner;
 use esp_backtrace as _;
-use esp_hal::{clock::CpuClock, rng::Rng, timer::timg::TimerGroup};
-use log::info;
+use esp_hal::{
+    clock::CpuClock,
+    peripherals::{RADIO_CLK, RNG, TIMG0, WIFI},
+    rng::Rng,
+    timer::timg::TimerGroup,
+};
+use log::{info, warn};
 
 #[embassy_executor::task]
 #[cfg(feature = "display-ssd1306")]
@@ -14,9 +19,9 @@ async fn display_things(hardware: gateway_board::display::GatewayDisplayHardware
 
 #[cfg(feature = "wifi")]
 #[embassy_executor::task]
-async fn run_wifi_ap(controller: esp_wifi::wifi::WifiController<'static>) -> ! {
+async fn run_wifi_controller(mut controller: gateway_board::net::WifiController<'static>) {
     info!("start wifi task");
-    gateway_board::net::run_access_point(controller).await
+    controller.run().await.expect("error while running wifi")
 }
 
 #[cfg(feature = "wifi")]
@@ -27,8 +32,10 @@ async fn run_dhcp(stack: embassy_net::Stack<'static>) -> ! {
 }
 
 #[cfg(feature = "wifi")]
-#[embassy_executor::task]
-async fn net_task(mut runner: embassy_net::Runner<'static, esp_wifi::wifi::WifiDevice<'static>>) {
+#[embassy_executor::task(pool_size = 2)]
+async fn run_net_stack(
+    mut runner: embassy_net::Runner<'static, esp_wifi::wifi::WifiDevice<'static>>,
+) -> ! {
     runner.run().await
 }
 
@@ -58,24 +65,18 @@ async fn main(spawner: Spawner) {
             esp_hal_embassy::init(systimer.alarm0);
         }
     }
-    let timg0 = TimerGroup::new(peripherals.TIMG0);
-    let rng = Rng::new(peripherals.RNG);
 
     info!("HAL intialized!");
 
     #[cfg(feature = "wifi")]
-    {
-        let esp_wifi_ctrl = ESP_WIFI_CTRL.init_with(|| {
-            esp_wifi::init(timg0.timer0, rng, peripherals.RADIO_CLK)
-                .expect("failed to init ESP wifi controller")
-        });
-        let wifi_ap_stack =
-            gateway_board::net::WifiApStack::new(esp_wifi_ctrl, rng, peripherals.WIFI);
-
-        spawner.must_spawn(run_wifi_ap(wifi_ap_stack.controller));
-        spawner.must_spawn(run_dhcp(wifi_ap_stack.stack));
-        spawner.must_spawn(net_task(wifi_ap_stack.runner));
-    }
+    setup_wifi(
+        spawner,
+        peripherals.TIMG0,
+        peripherals.RNG,
+        peripherals.RADIO_CLK,
+        peripherals.WIFI,
+    )
+    .await;
 
     #[cfg(feature = "display-ssd1306")]
     spawner.must_spawn(display_things(
@@ -87,4 +88,42 @@ async fn main(spawner: Spawner) {
             rst: peripherals.GPIO21,
         },
     ));
+}
+
+async fn setup_wifi(spawner: Spawner, timg0: TIMG0, rng: RNG, radio_clk: RADIO_CLK, wifi: WIFI) {
+    let timg0 = TimerGroup::new(timg0);
+    let rng = Rng::new(rng);
+
+    let esp_wifi_ctrl = ESP_WIFI_CTRL.init_with(|| {
+        esp_wifi::init(timg0.timer0, rng, radio_clk).expect("failed to init ESP wifi controller")
+    });
+    let (mut wifi_ctrl, wifi_runners) = gateway_board::net::init_wifi(esp_wifi_ctrl, rng, wifi)
+        .expect("failed to initialize wifi stack");
+
+    const WIFI_STA_SSID: Option<&'static str> = option_env!("WIFI_STA_SSID");
+    const WIFI_STA_PASS: Option<&'static str> = option_env!("WIFI_STA_PASS");
+    const WIFI_AP_SSID: &str = match option_env!("WIFI_AP_SSID") {
+        Some(ssid) => ssid,
+        None => "lora-gateway-wifi",
+    };
+
+    wifi_ctrl
+        .enable_ap(WIFI_AP_SSID)
+        .expect("AP configuration failed");
+
+    match (WIFI_STA_SSID, WIFI_STA_PASS) {
+        (None, Some(_)) => warn!("not connecting to wifi: missing SSID"),
+        (Some(_), None) => warn!("not connecting to wifi: missing password"),
+        (None, None) => warn!("not connecting to wifi: missing SSID and password"),
+        (Some(sta_ssid), Some(sta_pass)) => {
+            wifi_ctrl
+                .enable_sta(sta_ssid, sta_pass)
+                .expect("STA configuration failed");
+        }
+    }
+
+    spawner.must_spawn(run_net_stack(wifi_runners.ap_runner));
+    spawner.must_spawn(run_net_stack(wifi_runners.sta_runner));
+    spawner.must_spawn(run_dhcp(wifi_ctrl.ap_stack));
+    spawner.must_spawn(run_wifi_controller(wifi_ctrl));
 }
