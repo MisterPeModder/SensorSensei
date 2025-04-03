@@ -100,6 +100,7 @@ async fn main(spawner: Spawner) {
     ));
 }
 
+#[cfg(feature = "wifi")]
 async fn setup_wifi(spawner: Spawner, timg0: TIMG0, rng: RNG, radio_clk: RADIO_CLK, wifi: WIFI) {
     let timg0 = TimerGroup::new(timg0);
     let rng = Rng::new(rng);
