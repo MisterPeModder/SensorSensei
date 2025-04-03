@@ -1,10 +1,10 @@
 use core::net::Ipv4Addr;
 
+use defmt::{error, info};
 use embassy_futures::select::Either;
 use embassy_net::{tcp::TcpSocket, IpListenEndpoint, Stack};
 use embassy_time::{Duration, Timer};
 use embedded_io_async::Write;
-use log::{error, info};
 
 use super::tcp::BoxedTcpSocket;
 
@@ -69,8 +69,8 @@ impl<'a> HttpServer<'a> {
             match r {
                 Either::First(Ok(())) => Self::handle_client(&mut self.ap_socket).await,
                 Either::Second(Ok(())) => Self::handle_client(&mut self.sta_socket).await,
-                Either::First(Err(e)) => error!("http: AP socket error: {e:?}"),
-                Either::Second(Err(e)) => error!("http: STA socket error: {e:?}"),
+                Either::First(Err(e)) => error!("http: AP socket error: {:?}", e),
+                Either::Second(Err(e)) => error!("http: STA socket error: {:?}", e),
             }
         }
     }
@@ -107,7 +107,7 @@ impl<'a> HttpServer<'a> {
             .await;
 
         if let Err(e) = r {
-            error!("http: write error: {e:?}");
+            error!("http: write error: {:?}", e);
         }
 
         let r = sock.flush().await;

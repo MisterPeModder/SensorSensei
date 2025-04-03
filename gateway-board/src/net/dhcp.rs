@@ -1,5 +1,6 @@
 use core::net::{Ipv4Addr, SocketAddrV4};
 
+use defmt::{warn, Debug2Format};
 use edge_dhcp::{
     io::DEFAULT_SERVER_PORT,
     server::{Server, ServerOptions},
@@ -51,7 +52,7 @@ impl GatewayDhcpServer {
                 &mut self.buf,
             )
             .await
-            .inspect_err(|e| log::warn!("DHCP server error: {e:?}"));
+            .inspect_err(|e| warn!("DHCP server error: {:?}", Debug2Format(e)));
             Timer::after(Duration::from_millis(500)).await;
         }
     }

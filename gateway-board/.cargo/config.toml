@@ -1,14 +1,14 @@
 [target.xtensa-esp32s3-none-elf]
-runner = "espflash flash --monitor"
+runner = "espflash flash --monitor --log-format defmt"
 
 [target.xtensa-esp32-none-elf]
-runner = "espflash flash --monitor"
+runner = "espflash flash --monitor --log-format defmt"
 
 [env]
-ESP_LOG = "INFO"
+DEFMT_LOG = "info"
 
 [build]
-rustflags = ["-C", "link-arg=-nostartfiles"]
+rustflags = ["-C", "link-arg=-nostartfiles", "-C", "link-arg=-Tdefmt.x"]
 
 target = "xtensa-esp32s3-none-elf"
 
