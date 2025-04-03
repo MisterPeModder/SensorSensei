@@ -3,6 +3,7 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
+use defmt::info;
 use display_interface::DisplayError;
 use embassy_time::{Duration, Ticker, Timer};
 use esp_hal::{
@@ -12,7 +13,6 @@ use esp_hal::{
     time::Rate,
     Async,
 };
-use log::info;
 use ssd1306::{
     mode::{DisplayConfig, TerminalMode, TerminalModeError},
     prelude::{Brightness, DisplayRotation, I2CInterface},

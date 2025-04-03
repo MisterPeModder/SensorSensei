@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+use defmt::{info, warn};
 use embassy_executor::Spawner;
 use esp_backtrace as _;
 use esp_hal::{
@@ -9,7 +10,6 @@ use esp_hal::{
     rng::Rng,
     timer::timg::TimerGroup,
 };
-use log::{info, warn};
 
 #[embassy_executor::task]
 #[cfg(feature = "display-ssd1306")]
@@ -55,8 +55,6 @@ static ESP_WIFI_CTRL: static_cell::StaticCell<esp_wifi::EspWifiController<'stati
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
-    esp_println::logger::init_logger_from_env();
-
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 

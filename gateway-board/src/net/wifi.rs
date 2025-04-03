@@ -1,3 +1,4 @@
+use defmt::{error, info, warn, Debug2Format};
 use embassy_net::{Runner, Stack, StackResources, StaticConfigV4};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use embassy_time::{Duration, Timer};
@@ -10,7 +11,6 @@ use esp_wifi::{
     },
     EspWifiController,
 };
-use log::{error, info, warn};
 use static_cell::StaticCell;
 
 use super::{GATEWAY_IP, GATEWAY_RANGE};
@@ -116,7 +116,10 @@ impl<'d> WifiController<'d> {
         let mut ap_enabled = mode.is_ap();
         let mut sta_enabled = mode.is_sta();
 
-        info!("wifi device capabilities: {:?}", self.ctrl.capabilities());
+        info!(
+            "wifi device capabilities: {:?}",
+            Debug2Format(&self.ctrl.capabilities())
+        );
 
         while ap_enabled | sta_enabled {
             let ctrl: ControllerMutex = ControllerMutex::new(&mut self.ctrl);
@@ -145,7 +148,7 @@ impl<'d> WifiController<'d> {
         while !matches!(esp_wifi::wifi::ap_state(), WifiState::ApStarted) {
             info!("wifi AP: starting access point...");
             if let Err(e) = ctrl.lock().await.start_async().await {
-                error!("wifi AP: start failed, attempting after {DELAY}: {e:?}");
+                error!("wifi AP: start failed, attempting after {}: {:?}", DELAY, e);
                 Timer::after(DELAY).await;
             } else {
                 info!(
@@ -176,7 +179,10 @@ impl<'d> WifiController<'d> {
                             config.ssid, config.auth_method
                         );
                         if let Err(e) = ctrl.lock().await.connect_async().await {
-                            error!("wifi STA: connect failed, attempting after {DELAY}: {e:?}");
+                            error!(
+                                "wifi STA: connect failed, attempting after {}: {:?}",
+                                DELAY, e
+                            );
                             Timer::after(DELAY).await;
                         } else {
                             info!("wifi STA: connected to access point");
@@ -188,7 +194,10 @@ impl<'d> WifiController<'d> {
                     // station mode not started yet
                     info!("wifi STA: starting controller...");
                     if let Err(e) = ctrl.lock().await.start_async().await {
-                        error!("wifi STA: start failed, attempting after {DELAY}: {e:?}");
+                        error!(
+                            "wifi STA: start failed, attempting after {}: {:?}",
+                            DELAY, e
+                        );
                         Timer::after(DELAY).await;
                     } else {
                         info!("wifi STA: started");

@@ -36,21 +36,22 @@ wifi = [
 
 [dependencies]
 cfg-if = "1.0.0"
+defmt = "1.0.1"
 display-interface = { version = "0.5.0", optional = true }
 edge-dhcp = { version = "0.5.0", optional = true }
 edge-nal-embassy = { version = "0.5.0", optional = true }
 edge-nal = { version = "0.5.0", optional = true }
 embassy-executor = { version = "0.7.0", features = ["task-arena-size-20480"] }
-embassy-futures = { version = "0.1.1", features = ["log"] }
+embassy-futures = { version = "0.1.1", features = ["defmt"] }
 embassy-net = { version = "0.6.0", optional = true, features = [
   "dhcpv4",
-  "log",
+  "defmt",
   "proto-ipv4",
   "tcp",
   "medium-ethernet",
 ] }
 embassy-sync = "0.6.2"
-embassy-time = { version = "0.4.0" }
+embassy-time = { version = "0.4.0", features = ["defmt"] }
 embedded-hal-async = "1.0.0"
 embedded-io-async = "0.6.1"
 enumset = "1.1.5"
@@ -62,10 +63,9 @@ esp-backtrace = { version = "0.15.0", features = [
 ] }
 esp-hal = { version = "1.0.0-beta.0", features = ["unstable"] }
 esp-hal-embassy = { version = "0.7.0", features = [] }
-esp-println = { version = "0.13.0", features = ["log"] }
-esp-wifi = { version = "0.13.0", optional = true, features = ["log", "wifi"] }
+esp-println = { version = "0.13.0", features = ["defmt-espflash"] }
+esp-wifi = { version = "0.13.0", optional = true, features = ["defmt", "wifi"] }
 heapless = { version = "0.8.0", optional = true }
-log = { version = "0.4.21" }
 portable-atomic = "1.11.0"
 thiserror = { version = "2.0.12", default-features = false }
 ssd1306 = { version = "0.10.0", optional = true, features = ["async"] }
