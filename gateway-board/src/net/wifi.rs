@@ -41,7 +41,7 @@ pub fn init_wifi<'d>(
     });
     let sta_config = embassy_net::Config::dhcpv4(Default::default());
 
-    let seed = (rng.random() as u64) << 32 | rng.random() as u64;
+    let seed = ((rng.random() as u64) << 32) | rng.random() as u64;
 
     let ap_stack_res = STACK_RESOUCES_AP.init_with(StackResources::<MAX_SOCKETS_AP>::new);
     let sta_stack_res = STACK_RESOUCES_STA.init_with(StackResources::<MAX_SOCKETS_STA>::new);
