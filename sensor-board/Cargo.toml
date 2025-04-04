@@ -7,6 +7,12 @@ version = "0.1.0"
 name = "sensor-board"
 path = "./src/bin/main.rs"
 
+[features]
+default = ["lora"]
+
+lora = ["lora-phy"]
+
+
 [dependencies]
 critical-section = "1.2.0"
 esp-alloc = { version = "0.6.0" }
@@ -16,11 +22,24 @@ esp-backtrace = { version = "0.15.0", features = [
   "panic-handler",
   "println",
 ] }
-esp-hal = { version = "0.23.1", features = ["esp32"] }
-esp-println = { version = "0.13.0", features = ["esp32", "log"] }
-log = { version = "0.4.21" }
 # Needed by esp-hal (or else it won't resolve)
 esp-synopsys-usb-otg = { version = "0.4.2", features = ["fs", "esp32sx"] }
+defmt = "1.0.1"
+embassy-embedded-hal = { version = "0.3.0", features = ["defmt"] }
+embassy-executor = { version = "0.7.0", features = ["defmt", "task-arena-size-16384"] }
+embassy-sync = "0.6.2"
+embassy-time = { version = "0.4.0", features = ["generic-queue-64"] }
+esp-hal = { version = "1.0.0-beta.0", features = ["esp32", "defmt", "unstable"] }
+esp-hal-embassy = { version = "0.7.0", features = ["esp32"] }
+esp-println = { version = "0.13.1", features = ["esp32", "defmt-espflash"] }
+lora-phy = { version = "3.0.1", optional = true }
+static_cell = "2.1.0"
+thiserror = { version = "2.0.12", default-features = false }
+
+
+
+[build-dependencies]
+embuild = "0.33"
 
 [profile.dev]
 # Rust debug is too slow.
