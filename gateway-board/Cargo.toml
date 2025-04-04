@@ -8,7 +8,7 @@ name = "gateway-board"
 path = "./src/bin/main.rs"
 
 [features]
-default = ["board-heltec-lora32v3", "display-ssd1306", "wifi"]
+default = ["board-heltec-lora32v3", "display-ssd1306", "lora", "wifi"]
 
 board-esp32dev = [
   "esp-backtrace/esp32",
@@ -25,6 +25,7 @@ board-heltec-lora32v3 = [
   "esp-wifi/esp32s3",
 ]
 display-ssd1306 = ["display-interface", "ssd1306"]
+lora = ["lora-phy"]
 wifi = [
   "edge-dhcp",
   "edge-nal-embassy",
@@ -41,6 +42,7 @@ display-interface = { version = "0.5.0", optional = true }
 edge-dhcp = { version = "0.5.0", optional = true }
 edge-nal-embassy = { version = "0.5.0", optional = true }
 edge-nal = { version = "0.5.0", optional = true }
+embassy-embedded-hal = { version = "0.3.0", features = ["defmt"] }
 embassy-executor = { version = "0.7.0", features = ["task-arena-size-20480"] }
 embassy-futures = { version = "0.1.1", features = ["defmt"] }
 embassy-net = { version = "0.6.0", optional = true, features = [
@@ -66,6 +68,7 @@ esp-hal-embassy = { version = "0.7.0", features = [] }
 esp-println = { version = "0.13.0", features = ["defmt-espflash"] }
 esp-wifi = { version = "0.13.0", optional = true, features = ["defmt", "wifi"] }
 heapless = { version = "0.8.0", optional = true }
+lora-phy = { version = "3.0.1", optional = true }
 portable-atomic = "1.11.0"
 thiserror = { version = "2.0.12", default-features = false }
 ssd1306 = { version = "0.10.0", optional = true, features = ["async"] }

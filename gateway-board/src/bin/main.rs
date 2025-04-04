@@ -53,6 +53,17 @@ async fn run_http(
 static ESP_WIFI_CTRL: static_cell::StaticCell<esp_wifi::EspWifiController<'static>> =
     static_cell::StaticCell::new();
 
+#[cfg(feature = "lora")]
+#[embassy_executor::task]
+async fn run_lora(hardware: gateway_board::lora::LoraHardware) {
+    use gateway_board::lora::LoraController;
+
+    let mut lora = LoraController::new(hardware)
+        .await
+        .expect("failed to initialize LoRa");
+    lora.run().await.expect("error while setting LoRa recieve");
+}
+
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
@@ -96,6 +107,18 @@ async fn main(spawner: Spawner) {
             rst: peripherals.GPIO21,
         },
     ));
+
+    #[cfg(feature = "lora")]
+    spawner.must_spawn(run_lora(gateway_board::lora::LoraHardware {
+        spi: peripherals.SPI2,
+        spi_nss: peripherals.GPIO8,
+        spi_scl: peripherals.GPIO9,
+        spi_mosi: peripherals.GPIO10,
+        spi_miso: peripherals.GPIO11,
+        reset: peripherals.GPIO12,
+        busy: peripherals.GPIO13,
+        dio1: peripherals.GPIO14,
+    }));
 }
 
 #[cfg(feature = "wifi")]
