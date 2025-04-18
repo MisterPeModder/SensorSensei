@@ -1,0 +1,29 @@
+' Applicaton-Layer Protocol: uplink-first mode
+@startuml
+
+skinparam dpi 300
+
+== Handshake phase ==
+"Sensor x" ->  Gateway : <b>HandshakeStart</b> packet
+alt
+  "Sensor x" <-- Gateway : <b>HandshakeEnd</b> packet
+else timeout
+  "Sensor x" --x Gateway : (full reconnect)
+end
+
+...
+
+== Uplink phase ==
+loop
+  "Sensor x" ->  Gateway : any uplink message
+  alt success, no response
+    "Sensor x" <-- Gateway : <b>Ack</b> packet
+  else success, has response
+    "Sensor x" <-- Gateway : correspoding response
+  else gateway rejects message
+    "Sensor x" <-- Gateway : <b>ResetConnection</b> packet
+  else timeout
+    "Sensor x" --x Gateway : (full reconnect)
+  end
+end
+@enduml
