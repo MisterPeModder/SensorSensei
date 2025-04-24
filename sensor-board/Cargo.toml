@@ -35,6 +35,8 @@ esp-println = { version = "0.13.1", features = ["esp32", "defmt-espflash"] }
 lora-phy = { version = "3.0.1", optional = true }
 static_cell = "2.1.0"
 thiserror = { version = "2.0.12", default-features = false }
+dust_sensor_gp2y1014au = { path = "../drivers/dust_sensor_gp2y1014au" }
+
 
 
 
