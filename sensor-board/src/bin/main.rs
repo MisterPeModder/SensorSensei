@@ -4,6 +4,7 @@
 #![no_main]
 
 use defmt::info;
+use dust_sensor_gp2y1014au::{Gp2y1014au, Gp2y1014auHardware};
 use embassy_executor::Spawner;
 use esp_hal::{clock::CpuClock, timer::timg::TimerGroup};
 use esp_println as _;
@@ -16,6 +17,15 @@ async fn main(_spawner: Spawner) {
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
     let timer_group = TimerGroup::new(peripherals.TIMG0);
     esp_hal_embassy::init(timer_group.timer1);
+
+    let mut dust_sensor = Gp2y1014au::new(
+        Gp2y1014auHardware {
+            adci: peripherals.ADC2,
+            pin_led: peripherals.GPIO13,
+            pin_data: peripherals.GPIO4,
+        },
+        1024,
+    );
 
     let mut lora = LoraController::new(LoraHardware {
         spi: peripherals.SPI2,
@@ -31,12 +41,22 @@ async fn main(_spawner: Spawner) {
     let buffer = b"world";
 
     loop {
-        // for i in 0..10 {
         info!("Sending packet {}", buffer);
         lora.send(buffer).await.unwrap();
+
+        match dust_sensor.read().await {
+            Ok(value) => {
+                let density = dust_sensor.convert_analog_to_density(value);
+                info!("Sensor value: {} mg/m3 (raw: {})", density, value);
+            }
+            Err(e) => {
+                info!("Error reading sensor: {:?}", e);
+            }
+        }
+
         // sleep
-        info!("Sleeping for 1 second");
-        embassy_time::Timer::after(embassy_time::Duration::from_secs(1)).await;
+        info!("Sleeping for 2 seconds");
+        embassy_time::Timer::after(embassy_time::Duration::from_secs(2)).await;
     }
 }
 
