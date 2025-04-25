@@ -3,10 +3,11 @@
 #![no_std]
 #![no_main]
 
+use bmp280_ehal::BMP280;
 use defmt::info;
 use dust_sensor_gp2y1014au::{Gp2y1014au, Gp2y1014auHardware};
 use embassy_executor::Spawner;
-use esp_hal::{clock::CpuClock, timer::timg::TimerGroup};
+use esp_hal::{clock::CpuClock, i2c::master::I2c, time::Rate, timer::timg::TimerGroup};
 use esp_println as _;
 use sensor_board::lora::{LoraController, LoraHardware};
 
@@ -18,6 +19,16 @@ async fn main(_spawner: Spawner) {
     let timer_group = TimerGroup::new(peripherals.TIMG0);
     esp_hal_embassy::init(timer_group.timer1);
 
+    let i2c = I2c::new(
+        peripherals.I2C0,
+        esp_hal::i2c::master::Config::default().with_frequency(Rate::from_hz(500000)),
+    )
+    .unwrap()
+    .with_scl(peripherals.GPIO22)
+    .with_sda(peripherals.GPIO21)
+    .into_async();
+
+    let mut bmp = BMP280::new(i2c).unwrap();
     let mut dust_sensor = Gp2y1014au::new(
         Gp2y1014auHardware {
             adci: peripherals.ADC2,
@@ -53,6 +64,9 @@ async fn main(_spawner: Spawner) {
                 info!("Error reading sensor: {:?}", e);
             }
         }
+        // Read BMP280 sensor
+        info!("Pressure: {} Pa", bmp.pressure());
+        info!("Temperature: {} C", bmp.temp());
 
         // sleep
         info!("Sleeping for 2 seconds");
