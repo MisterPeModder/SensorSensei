@@ -171,7 +171,7 @@ A full reconnect attempt is made at the link layer after the packet is received.
 | Name        | Type | Value Encoding | Description                             |
 |-------------|------|----------------|-----------------------------------------|
 | temperature | 0    | f32            | temperature in degrees Celsius          |
-| pressure    | 1    | f32            | pressure in pascals                     |
+| pressure    | 1    | u32            | pressure in pascals                     |
 | altitude    | 2    | f32            | altitude in meters                      |
 | unknown     | x    | n/a            | for compatibility with future protocols |
 
