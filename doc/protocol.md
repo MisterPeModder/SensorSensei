@@ -21,7 +21,12 @@ The protocol stack consists of three layers:
 - **Application Layer**: The application layer is responsible for the actual data exchange between the client and the
   gateway. It defines the format of the messages exchanged, including the types of data that can be sent and received.
 
-## 1.3 Terminology
+## 1.3 Requirements
+
+The keywords "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY",
+and "OPTIONAL" in this document are to be interpreted as described in RFC 2119.
+
+## 1.4 Terminology
 
 - **Client**: A device that sends and receives data to/from the gateway.
 - **Gateway**: The central device that communicates with clients.
@@ -133,6 +138,9 @@ A full reconnect attempt is made at the link layer after the packet is received.
 | tail_len | 1:5          | u32            | --    | Length of `tail` array        |
 | tail     | `0:tail_len` | `u8[tail_len]` | --    | unused as of version 1.0      |
 
+For forward compatibility with future versions, decoders *should* read exactly `tail_len` bytes after the `tail_len` field itself,
+even if the incoming data is overflowing the bounds of the expected values.
+
 ### 4.3.4 HandshakeEnd
 
 | Name     | Size | Type | Value | Description                              |
@@ -142,6 +150,9 @@ A full reconnect attempt is made at the link layer after the packet is received.
 | minor    | 1    | u8   | 0     | minor protocol version (v1.0)            |
 | tail_len | 1:5  | u32  | 1:10  | length of `tail` array                   |
 | epoch    | 1:10 | u64  | --    | reference unix timestamp in milliseconds |
+
+For forward compatibility with future versions, decoders *should* read exactly `tail_len` bytes after the `tail_len` field itself,
+even if the incoming data is overflowing the bounds of the expected values.
 
 ### 4.3.5 Ack
 
@@ -173,6 +184,7 @@ A full reconnect attempt is made at the link layer after the packet is received.
 | temperature | 0    | f32            | temperature in degrees Celsius          |
 | pressure    | 1    | u32            | pressure in pascals                     |
 | altitude    | 2    | f32            | altitude in meters                      |
+| air_quality | 3    | f32            | air quality in mg/m3                    |
 | unknown     | x    | n/a            | for compatibility with future protocols |
 
 ### 4.3.7 ResetConnection
