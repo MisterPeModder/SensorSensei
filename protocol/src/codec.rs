@@ -9,13 +9,38 @@ pub trait AsyncEncoder {
     async fn emit<T: AsyncEncode<Self>>(&mut self, value: T) -> Result<(), Self::Error> {
         value.encode(self).await
     }
+}
 
-    async fn emit_from_iter<T: AsyncEncode<Self>, I>(&mut self, iter: I) -> Result<(), Self::Error>
-    where
-        I: IntoIterator<Item = T>,
-    {
-        for value in iter {
-            value.encode(self).await?;
+pub trait AsyncDecoder {
+    type Error: core::error::Error;
+
+    /// "Blocks" until the full buffer is filled.
+    /// This is a no-op if `buf` is an empty slice.
+    async fn read_bytes(&mut self, buf: &mut [u8]) -> Result<(), Self::Error>;
+
+    /// Returns the number of bytes read from the first call to [`read_bytes`].  
+    /// Successive calls to this function will yield a value that is always equal or greater than the previous call,
+    /// except in the case of overflow.
+    /// Note: this number is allowed to overflow (in case of *really* long-running programs).
+    fn current_offset(&self) -> usize;
+
+    fn decoding_error(&self) -> Self::Error;
+
+    /// Reads a value of type `F` from the stream.  
+    /// Returns the value and the number of bytes that were read.
+    #[inline]
+    async fn read<T: AsyncDecode<Self>>(&mut self) -> Result<T, Self::Error> {
+        T::decode(self).await
+    }
+
+    /// Reads exactly `n` bytes from a stream, discarding them.
+    async fn read_discard(&mut self, mut n: usize) -> Result<(), Self::Error> {
+        let mut buf = [0u8; 16];
+
+        while n > 0 {
+            let to_discard = n.min(buf.len());
+            self.read_bytes(&mut buf[..to_discard]).await?;
+            n -= to_discard;
         }
         Ok(())
     }
@@ -23,6 +48,12 @@ pub trait AsyncEncoder {
 
 pub trait AsyncEncode<E: AsyncEncoder + ?Sized> {
     async fn encode(self, encoder: &mut E) -> Result<(), E::Error>;
+}
+
+pub trait AsyncDecode<D: AsyncDecoder + ?Sized> {
+    async fn decode(decoder: &mut D) -> Result<Self, D::Error>
+    where
+        Self: Sized;
 }
 
 // impl AsyncEncode for refs for convenience
@@ -52,13 +83,23 @@ macro_rules! tuple_encoding {
                 Ok(())
             }
         }
+
+        impl<D, $($t,)+> AsyncDecode<D> for ($($t,)+)
+        where
+            D: AsyncDecoder + ?Sized,
+            $($t : AsyncDecode<D>,)+
+        {
+            #[allow(non_snake_case)]
+            async fn decode(decoder: &mut D) -> Result<Self, D::Error> {
+                $(let $t = $t::decode(decoder).await?;)+
+                Ok(($($t,)+))
+            }
+        }
     };
 }
 
-tuple_encoding!(T0);
 tuple_encoding!(T0, T1);
 tuple_encoding!(T0, T1, T2);
-tuple_encoding!(T0, T1, T2, T3);
 
 pub trait ToLeb128Ext<const N: usize> {
     fn to_leb128(self, buf: &mut [u8; N]) -> &[u8];
@@ -85,6 +126,25 @@ macro_rules! uleb128_encoding {
             async fn encode(self, encoder: &mut E) -> Result<(), E::Error> {
                 let mut buf = [0u8; $n];
                 encoder.emit_bytes(self.to_leb128(&mut buf)).await
+            }
+        }
+
+        impl<D: AsyncDecoder + ?Sized> AsyncDecode<D> for $type {
+            async fn decode(decoder: &mut D) -> Result<Self, D::Error> {
+                let mut byte = [0u8; 1];
+                let mut val: $type = 0;
+                let mut shift: $type = 0;
+
+                for _ in 0..$n {
+                    decoder.read_bytes(&mut byte).await?;
+                    val |= ((byte[0] & 0x7f) as $type) << shift;
+                    shift += 7;
+                    if byte[0] & 0x80 == 0 {
+                        break;
+                    }
+                }
+
+                Ok(val)
             }
         }
     };
@@ -118,6 +178,30 @@ macro_rules! sleb128_encoding {
                 encoder.emit_bytes(self.to_leb128(&mut buf)).await
             }
         }
+
+        impl<D: AsyncDecoder + ?Sized> AsyncDecode<D> for $type {
+            async fn decode(decoder: &mut D) -> Result<Self, D::Error> {
+                let mut byte = [0u8; 1];
+                let mut val: $type = 0;
+                let mut shift: u32 = 0;
+
+                for _ in 0..$n {
+                    decoder.read_bytes(&mut byte).await?;
+
+                    val |= ((byte[0] & 0x7f) as $type) << shift;
+                    shift += 7;
+
+                    if byte[0] & 0x80 == 0 {
+                        if shift < 64 && (byte[0] & 0x40) != 0 {
+                            val |= (!0 as $type) << shift;
+                        }
+                        break;
+                    }
+                }
+
+                Ok(val)
+            }
+        }
     };
 }
 
@@ -132,10 +216,28 @@ impl<E: AsyncEncoder + ?Sized> AsyncEncode<E> for u8 {
     }
 }
 
+impl<D: AsyncDecoder + ?Sized> AsyncDecode<D> for u8 {
+    #[inline]
+    async fn decode(decoder: &mut D) -> Result<Self, D::Error> {
+        let mut buf = [0u8; 1];
+        decoder.read_bytes(&mut buf).await?;
+        Ok(buf[0])
+    }
+}
+
 impl<E: AsyncEncoder + ?Sized> AsyncEncode<E> for f32 {
     #[inline]
     async fn encode(self, encoder: &mut E) -> Result<(), E::Error> {
         // encode f32 as 4 little endian bytes for now
         encoder.emit_bytes(&self.to_le_bytes()).await
+    }
+}
+
+impl<D: AsyncDecoder + ?Sized> AsyncDecode<D> for f32 {
+    #[inline]
+    async fn decode(decoder: &mut D) -> Result<Self, D::Error> {
+        let mut buf = [0u8; 4];
+        decoder.read_bytes(&mut buf).await?;
+        Ok(f32::from_le_bytes(buf))
     }
 }

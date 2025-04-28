@@ -27,7 +27,7 @@ pub mod v1 {
         /// This function is not guaranteed to immediately send the data to the peer and instead buffer it for efficiency reasons.
         /// Please call `flush()` upon finishing writing app-level packets.
         ///
-        /// Returns the amount of bytes written, this number is smaller of equal to the buffer length.
+        /// Returns the amount of bytes written, this number is smaller or equal to the buffer length.
         async fn write(
             &mut self,
             dest: Option<Self::DestId>,
