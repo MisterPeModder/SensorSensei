@@ -27,6 +27,7 @@ jobs:
         directory:
           - gateway-board
           - sensor-board
+          - protocol
 
     steps:
       - name: Checkout repository
