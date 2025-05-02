@@ -83,7 +83,7 @@ This packet includes the major and minor version of the protocol that the client
 In response to the HandshakeStart packet, the gateway sends a HandshakeEnd packet back to the client.
 
 This packet includes the major and minor version of the protocol that the gateway supports and a reference timestamp
-(called _epoch_) in milliseconds since the Unix epoch (1970-01-01T00:00:00Z).
+(called _epoch_) in milliseconds since system boot of the gateway.
 
 The response version must satisfy the following conditions:
 
