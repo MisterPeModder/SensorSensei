@@ -18,7 +18,7 @@ pub trait AsyncDecoder {
     /// This is a no-op if `buf` is an empty slice.
     async fn read_bytes(&mut self, buf: &mut [u8]) -> Result<(), Self::Error>;
 
-    /// Returns the number of bytes read from the first call to [`read_bytes`].  
+    /// Returns the number of bytes read from the first call to [`Self::read_bytes`].  
     /// Successive calls to this function will yield a value that is always equal or greater than the previous call,
     /// except in the case of overflow.
     /// Note: this number is allowed to overflow (in case of *really* long-running programs).

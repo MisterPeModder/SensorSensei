@@ -14,7 +14,10 @@ lora = ["lora-phy"]
 
 
 [dependencies]
+bmp280-ehal = { git = "https://github.com/AndreasLrx/bmp280" }
 critical-section = "1.2.0"
+defmt = "1.0.1"
+dust_sensor_gp2y1014au = { path = "../drivers/dust_sensor_gp2y1014au" }
 esp-alloc = { version = "0.6.0" }
 esp-backtrace = { version = "0.15.0", features = [
   "esp32",
@@ -24,7 +27,6 @@ esp-backtrace = { version = "0.15.0", features = [
 ] }
 # Needed by esp-hal (or else it won't resolve)
 esp-synopsys-usb-otg = { version = "0.4.2", features = ["fs", "esp32sx"] }
-defmt = "1.0.1"
 embassy-embedded-hal = { version = "0.3.0", features = ["defmt"] }
 embassy-executor = { version = "0.7.0", features = ["defmt", "task-arena-size-16384"] }
 embassy-sync = "0.6.2"
@@ -33,12 +35,10 @@ esp-hal = { version = "1.0.0-beta.0", features = ["esp32", "defmt", "unstable"] 
 esp-hal-embassy = { version = "0.7.0", features = ["esp32"] }
 esp-println = { version = "0.13.1", features = ["esp32", "defmt-espflash"] }
 lora-phy = { version = "3.0.1", optional = true }
+protocol = { path = "../protocol" }
 static_cell = "2.1.0"
 thiserror = { version = "2.0.12", default-features = false }
-dust_sensor_gp2y1014au = { path = "../drivers/dust_sensor_gp2y1014au" }
-bmp280-ehal = { git = "https://github.com/AndreasLrx/bmp280" }
-
-
+heapless = "0.8.0"
 
 [build-dependencies]
 embuild = "0.33"

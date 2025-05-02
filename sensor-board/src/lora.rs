@@ -1,4 +1,5 @@
-use defmt::{error, info, Format};
+use core::future::Future;
+use defmt::{error, Format};
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use embassy_time::Delay;
@@ -17,6 +18,7 @@ use lora_phy::{
     sx127x::{self, Sx1276, Sx127x},
     LoRa,
 };
+use protocol::phy::PhysicalLayer;
 use static_cell::StaticCell;
 use thiserror::Error;
 
@@ -29,6 +31,7 @@ const LORA_BANDWITH: Bandwidth = Bandwidth::_250KHz;
 const LORA_CODING_RATE: CodingRate = CodingRate::_4_8;
 /// Controls the chirp rate. Lower values are slower bandwidth (longer time on air), but more robust.
 const LORA_SPREADING_FACTOR: SpreadingFactor = SpreadingFactor::_10;
+const LORA_RX_BUF_SIZE: usize = 128;
 
 pub struct LoraHardware {
     pub spi: SPI2,
@@ -51,6 +54,8 @@ pub struct LoraController {
     lora: TBeamLora32Lora,
     modulation_params: ModulationParams,
     tx_packet_params: PacketParams,
+    rx_packet_params: PacketParams,
+    rx_buffer: heapless::Vec<u8, LORA_RX_BUF_SIZE>,
 }
 
 /// One-stop shop for LoRa-related errors
@@ -73,7 +78,7 @@ static SPI_BUS: StaticCell<Mutex<NoopRawMutex, AsyncSpi>> = StaticCell::new();
 impl LoraController {
     pub async fn new(hardware: LoraHardware) -> Result<Self, LoraError> {
         // The SPI bus used by the lora dio is exclusive to it.
-        // No need to use mutexes or other synchonization
+        // No need to use mutexes or other synchronization
         let spi: AsyncSpi = esp_hal::spi::master::Spi::new(
             hardware.spi,
             esp_hal::spi::master::Config::default()
@@ -109,11 +114,9 @@ impl LoraController {
 
         // Create the radio instance
         let iv: GenericSx127xInterfaceVariant<Output<'static>, Input<'static>> =
-            GenericSx127xInterfaceVariant::new(reset, dio1, None, None).unwrap();
+            GenericSx127xInterfaceVariant::new(reset, dio1, None, None)?;
         let mut lora: TBeamLora32Lora =
-            LoRa::new(Sx127x::new(spi_device, iv, sx127x_config), false, Delay)
-                .await
-                .unwrap();
+            LoRa::new(Sx127x::new(spi_device, iv, sx127x_config), false, Delay).await?;
 
         let modulation_params = lora.create_modulation_params(
             LORA_SPREADING_FACTOR,
@@ -126,15 +129,25 @@ impl LoraController {
         let tx_packet_params =
             lora.create_tx_packet_params(4, false, true, false, &modulation_params)?;
 
+        let rx_packet_params = lora.create_rx_packet_params(
+            4,
+            false,
+            LORA_RX_BUF_SIZE as u8,
+            true,
+            false,
+            &modulation_params,
+        )?;
+
         Ok(LoraController {
             lora,
             modulation_params,
             tx_packet_params,
+            rx_packet_params,
+            rx_buffer: heapless::Vec::new(),
         })
     }
 
-    pub async fn send(&mut self, buffer: &[u8]) -> Result<(), LoraError> {
-        info!("Preparing for TX");
+    pub async fn send(&mut self, buffer: &[u8]) -> Result<usize, LoraError> {
         self.lora
             .prepare_for_tx(
                 &self.modulation_params,
@@ -144,11 +157,57 @@ impl LoraController {
             )
             .await?;
 
-        info!("Send TX");
-        Ok(self.lora.tx().await?)
+        self.lora.tx().await?;
+        Ok(buffer.len())
+    }
+
+    async fn recv(&mut self) -> Result<(), LoraError> {
+        self.lora
+            .prepare_for_rx(
+                lora_phy::RxMode::Continuous,
+                &self.modulation_params,
+                &self.rx_packet_params,
+            )
+            .await?;
+
+        unsafe {
+            self.rx_buffer.set_len(LORA_RX_BUF_SIZE);
+        }
+        let (received_len, _rx_pkt_status) = self
+            .lora
+            .rx(&self.rx_packet_params, &mut self.rx_buffer)
+            .await?;
+        unsafe {
+            self.rx_buffer.set_len(received_len as usize);
+        }
+        Ok(())
     }
 
     pub async fn sleep(&mut self, wakeup: bool) -> Result<(), LoraError> {
         Ok(self.lora.sleep(wakeup).await?)
+    }
+}
+
+impl PhysicalLayer for LoraController {
+    type Error = LoraError;
+
+    fn send(&mut self, data: &[u8]) -> impl Future<Output = Result<usize, Self::Error>> {
+        LoraController::send(self, data)
+    }
+
+    async fn recv(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        if self.rx_buffer.is_empty() {
+            self.recv().await?;
+        }
+        if self.rx_buffer.is_empty() {
+            Ok(0)
+        } else {
+            // pop at most `buf.len()` bytes from the buffer
+            let len = buf.len().min(self.rx_buffer.len());
+            buf[..len].copy_from_slice(&self.rx_buffer[..len]);
+            self.rx_buffer.copy_within(len.., 0);
+            self.rx_buffer.truncate(self.rx_buffer.len() - len);
+            Ok(len)
+        }
     }
 }

@@ -1,7 +1,8 @@
-use defmt::{error, info, Format};
+use core::future::Future;
+use defmt::{error, info, Debug2Format, Format};
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
-use embassy_time::Delay;
+use embassy_time::{Delay, Instant};
 use esp_hal::{
     gpio::{GpioPin, Input, InputConfig, Level, Output, OutputConfig},
     peripherals::SPI2,
@@ -17,8 +18,17 @@ use lora_phy::{
     sx126x::{self, Sx1262, Sx126x, TcxoCtrlVoltage},
     LoRa,
 };
+use protocol::app::v1::{
+    DummyAppLayer, DummyAppLayerError, HandshakeEnd, HandshakeStart, Packet, SensorData,
+    SensorValue, SensorValuePoint,
+};
+use protocol::codec::{AsyncDecoder, AsyncEncoder};
+use protocol::link::v1::{DummyLinkLayer, LinkLayer};
+use protocol::phy::PhysicalLayer;
 use static_cell::StaticCell;
 use thiserror::Error;
+
+use crate::{PROTOCOL_VERSION_MAJOR, PROTOCOL_VERSION_MINOR};
 
 /// Channel to use, should be "unique". Use same frequencies as other devices causes spurious packets.
 const LORA_FREQUENCY_IN_HZ: u32 = 868_200_000;
@@ -52,7 +62,9 @@ type HeltecLora32Lora = LoRa<
 pub struct LoraController {
     lora: HeltecLora32Lora,
     modulation_params: ModulationParams,
+    tx_packet_params: PacketParams,
     rx_packet_params: PacketParams,
+    rx_buffer: heapless::Vec<u8, LORA_RX_BUF_SIZE>,
 }
 
 /// One-stop shop for LoRa-related errors
@@ -126,6 +138,9 @@ impl LoraController {
         )?;
 
         // Don't ask: I don't know what that is either
+        let tx_packet_params =
+            lora.create_tx_packet_params(4, false, true, false, &modulation_params)?;
+
         let rx_packet_params = lora.create_rx_packet_params(
             4,
             false,
@@ -138,15 +153,92 @@ impl LoraController {
         Ok(LoraController {
             lora,
             modulation_params,
+            tx_packet_params,
             rx_packet_params,
+            rx_buffer: heapless::Vec::new(),
         })
     }
 
-    /// Listens for LoRa packets in an infinte loop.
+    /// Listens for LoRa packets in an infinite loop.
     pub async fn run(&mut self) -> Result<(), LoraError> {
-        let mut rx_buffer = [0u8; LORA_RX_BUF_SIZE];
+        let link = DummyLinkLayer::new(self);
+        let mut app = DummyAppLayer::new(link);
 
-        info!("lora: preparing for receiving");
+        loop {
+            if let Err(err) = Self::comm_cycle(&mut app).await {
+                error!("comm error: {:?}", Debug2Format(&err));
+            }
+        }
+    }
+
+    async fn comm_cycle<LINK: LinkLayer>(
+        app: &mut DummyAppLayer<LINK>,
+    ) -> Result<(), DummyAppLayerError<LINK::Error>> {
+        info!("Waiting for client handshake...");
+
+        match app.read::<Packet>().await? {
+            Packet::HandshakeStart(HandshakeStart { major, minor }) if major != 1 => {
+                return Err(DummyAppLayerError::IncompatibleProtocol(major, minor))
+            }
+            Packet::HandshakeStart(_) => (),
+            pkt => return Err(DummyAppLayerError::UnexpectedPacket(pkt.id())),
+        }
+
+        let epoch = Instant::now();
+        app.emit(&Packet::HandshakeEnd(HandshakeEnd {
+            major: PROTOCOL_VERSION_MAJOR,
+            minor: PROTOCOL_VERSION_MINOR,
+            epoch: epoch.as_millis(),
+        }))
+        .await?;
+        app.flush().await?;
+
+        info!("Client handshake complete, waiting for sensor data...");
+
+        loop {
+            let count = match app.read::<Packet>().await? {
+                Packet::SensorData(SensorData { count }) => count,
+                pkt => return Err(DummyAppLayerError::UnexpectedPacket(pkt.id())),
+            };
+
+            for _ in 0..count {
+                let value_point = app.read::<SensorValuePoint>().await?;
+                let off = value_point.time_offset;
+
+                match value_point.value {
+                    SensorValue::Temperature(v) => info!("(T+{}) Received temperature: {}", off, v),
+                    SensorValue::Pressure(v) => info!("(T+{}) Received pressure: {}", off, v),
+                    SensorValue::Altitude(v) => info!("(T+{}) Received altitude: {}", off, v),
+                    SensorValue::AirQuality(v) => info!("(T+{}) Received air quality: {}", off, v),
+                    SensorValue::Unknown { id, value_len } => info!(
+                        "(T+{}) Received unknown sensor value: {:?} (len: {})",
+                        off, id, value_len
+                    ),
+                }
+            }
+            embassy_time::Timer::after(embassy_time::Duration::from_secs(2)).await;
+            info!("Done receiving sensor data, sending ack");
+
+            app.emit(&Packet::Ack).await?;
+            app.flush().await?;
+        }
+    }
+
+    pub async fn send(&mut self, buffer: &[u8]) -> Result<usize, LoraError> {
+        self.lora
+            .prepare_for_tx(
+                &self.modulation_params,
+                &mut self.tx_packet_params,
+                20,
+                buffer,
+            )
+            .await?;
+
+        self.lora.tx().await?;
+        Ok(buffer.len())
+    }
+
+    async fn recv(&mut self) -> Result<(), LoraError> {
         self.lora
             .prepare_for_rx(
                 lora_phy::RxMode::Continuous,
@@ -155,26 +247,40 @@ impl LoraController {
             )
             .await?;
 
-        info!("lora: indefinitely listeting for packets");
-        loop {
-            if let Err(e) = self.recv(&mut rx_buffer).await {
-                error!("lora: error: {:?}", e);
-            }
+        unsafe {
+            self.rx_buffer.set_len(LORA_RX_BUF_SIZE);
         }
+        let (received_len, _rx_pkt_status) = self
+            .lora
+            .rx(&self.rx_packet_params, &mut self.rx_buffer)
+            .await?;
+        unsafe {
+            self.rx_buffer.set_len(received_len as usize);
+        }
+        Ok(())
+    }
+}
+
+impl PhysicalLayer for LoraController {
+    type Error = LoraError;
+
+    fn send(&mut self, data: &[u8]) -> impl Future<Output = Result<usize, Self::Error>> {
+        LoraController::send(self, data)
     }
 
-    async fn recv(&mut self, rx_buffer: &mut [u8; LORA_RX_BUF_SIZE]) -> Result<(), LoraError> {
-        *rx_buffer = [0u8; LORA_RX_BUF_SIZE];
-        match self.lora.rx(&self.rx_packet_params, rx_buffer).await {
-            Ok((received_len, _rx_pkt_status)) => {
-                match core::str::from_utf8(&rx_buffer[..received_len as usize]) {
-                    Ok(received_str) => info!("lora: recieved \"{}\"", received_str),
-                    Err(_) => info!("lora: recieved binary payload (len={})", received_len),
-                }
-            }
-            Err(err) => info!("lora: rx unsuccessful = {}", err),
+    async fn recv(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        if self.rx_buffer.is_empty() {
+            self.recv().await?;
         }
-
-        Ok(())
+        if self.rx_buffer.is_empty() {
+            Ok(0)
+        } else {
+            // pop at most `buf.len()` bytes from the buffer
+            let len = buf.len().min(self.rx_buffer.len());
+            buf[..len].copy_from_slice(&self.rx_buffer[..len]);
+            self.rx_buffer.copy_within(len.., 0);
+            self.rx_buffer.truncate(self.rx_buffer.len() - len);
+            Ok(len)
+        }
     }
 }
