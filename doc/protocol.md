@@ -46,7 +46,23 @@ Here are the recommended LoRa parameters for the Unnamed Protocol Stack:
 
 # 3 Link Layer Protocol
 
-**TBD**
+## 3.1 Timing
+
+<p align="center">
+<img alt="application layer protocol timing" height="500" src="./diagrams/link-layer-protocol-sequence.png">
+</p>
+
+The linking is divided into two phases and a config:
+
+- **Config**: Both client and gateway has to be given matching pair of key to sign the exchange
+- **Handshake Phase**: The client initiates the connection by asking an ID to the gateway. He has to to send a fingerprint and hash it to ensure integrity.
+The gateway responds with an ID and the same fingerprint and hash it with the ID.
+- **Data send**: After a successful handshake, the client can send data to the gateway and then receive data from the gateway.
+
+## 4.2 Packet Types
+
+![Protocol Stack](./diagrams/link-layer-datagram.svg)
+
 
 # 4 Application Layer Protocol
 
