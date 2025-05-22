@@ -59,10 +59,47 @@ The linking is divided into two phases and a config:
 The gateway responds with an ID and the same fingerprint and hash it with the ID.
 - **Data send**: After a successful handshake, the client can send data to the gateway and then receive data from the gateway.
 
-## 4.2 Packet Types
+## 3.2 Packet Types & Format
+
+The link layer use the modulation of the Lora to implement a master/slave way to dialogue between boards.
+A packet can be :
+- **Uplink** : Sensor board to gateway 
+- **Downlink** : Gateway to sensor board
+
+Every packet follow this pattern
 
 ![Protocol Stack](./diagrams/link-layer-datagram.svg)
 
+- The two first bits represente the action. 
+  - First bit is used to switch between handshake phase or data send.
+  - Second bit is for future.
+- The next four bits are used to identify the sensor board. This ID is given by the gateway.
+- The next thirty four bits are used to sign the payload and ensure authenticity of the data. The signature MUST be a SHA-256 hash (truncated from MSB).
+
+### 3.2.1 Handshake Phase
+
+The sensor board MUST initiate the ask of an ID by sending a packet as follow:
+
+- action bits : 10
+- ID : 0000
+- signature : signature of the fingerprint
+- payload : a fingerprint (SHOULD be a MAC address)
+
+If the gateway doesn't have any ID slot left, it give the last assigned ID. It send a packet as follow:
+
+- action bits : 10
+- ID : the new sensor board ID
+- signature : signature of (fingerprint + ID)
+- payload : the same fingerprint sent by the sensorboard
+
+### 3.2.2 Data Send
+
+Once handshake done, both board can send a packet as follow:
+
+- action bits : 00
+- ID : the sensor board ID
+- signature : signature of the payload
+- payload : data to send
 
 # 4 Application Layer Protocol
 
