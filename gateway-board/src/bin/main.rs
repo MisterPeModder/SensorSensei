@@ -1,8 +1,9 @@
 #![no_std]
 #![no_main]
 
-use defmt::{info, warn};
+use defmt::{error, info, warn, Debug2Format};
 use embassy_executor::Spawner;
+use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
 use esp_hal::{
     clock::CpuClock,
@@ -45,8 +46,21 @@ async fn run_http(
     ap_stack: embassy_net::Stack<'static>,
     sta_stack: embassy_net::Stack<'static>,
 ) -> ! {
-    let mut server = gateway_board::net::HttpServer::new(ap_stack, sta_stack, 80).await;
+    let mut server = gateway_board::net::http::HttpServer::new(ap_stack, sta_stack, 80).await;
     server.run().await
+}
+
+#[cfg(feature = "wifi")]
+#[embassy_executor::task]
+async fn run_http_client(ap_stack: embassy_net::Stack<'static>) -> ! {
+    Timer::after(Duration::from_millis(10_000)).await;
+    loop {
+        info!("http-client: attempting request");
+        if let Err(e) = gateway_board::net::http_client_demo(ap_stack).await {
+            error!("http-client: error: {}", Debug2Format(&e));
+        }
+        Timer::after(Duration::from_millis(5000)).await;
+    }
 }
 
 #[cfg(feature = "wifi")]
@@ -162,4 +176,5 @@ async fn setup_wifi(spawner: Spawner, timg0: TIMG0, rng: RNG, radio_clk: RADIO_C
     spawner.must_spawn(run_dhcp(ap_stack));
     spawner.must_spawn(run_wifi_controller(wifi_ctrl));
     spawner.must_spawn(run_http(ap_stack, sta_stack));
+    spawner.must_spawn(run_http_client(sta_stack));
 }
