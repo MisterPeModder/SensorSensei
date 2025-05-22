@@ -1,19 +1,17 @@
 use core::net::Ipv4Addr;
 
+use super::SOCKET_TIMEOUT;
+use crate::net::tcp::BoxedTcpSocket;
 use defmt::{error, info};
 use embassy_futures::select::Either;
 use embassy_net::{tcp::TcpSocket, IpListenEndpoint, Stack};
 use embassy_time::{Duration, Timer};
 use embedded_io_async::Write;
 
-use super::tcp::BoxedTcpSocket;
-
-const SOCKET_TIMEOUT: Duration = Duration::from_secs(10);
-
 /// Dummy dual-stack HTTP server.
 ///
 /// Endpoints:
-/// - AP mode:  server on the gateway IP
+/// - AP mode: server on the gateway IP
 /// - STA mode: server exposed on an IP got from DHCP
 pub struct HttpServer<'a> {
     endpoint: IpListenEndpoint,

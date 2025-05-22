@@ -1,5 +1,5 @@
 use defmt::{error, info, warn, Debug2Format};
-use embassy_net::{Runner, Stack, StackResources, StaticConfigV4};
+use embassy_net::{Ipv4Address, Runner, Stack, StackResources, StaticConfigV4};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use embassy_time::{Duration, Timer};
 use enumset::{enum_set, EnumSet};
@@ -19,8 +19,8 @@ const MAX_SOCKETS_AP: usize = 3;
 const MAX_SOCKETS_STA: usize = 4;
 const DELAY: Duration = Duration::from_millis(2500);
 
-static STACK_RESOUCES_AP: StaticCell<StackResources<MAX_SOCKETS_AP>> = StaticCell::new();
-static STACK_RESOUCES_STA: StaticCell<StackResources<MAX_SOCKETS_STA>> = StaticCell::new();
+static STACK_RESOURCES_AP: StaticCell<StackResources<MAX_SOCKETS_AP>> = StaticCell::new();
+static STACK_RESOURCES_STA: StaticCell<StackResources<MAX_SOCKETS_STA>> = StaticCell::new();
 
 #[derive(Debug)]
 pub struct WifiConfigurationError;
@@ -34,17 +34,22 @@ pub fn init_wifi<'d>(
     let ap_device = interfaces.ap;
     let sta_device = interfaces.sta;
 
+    let mut dns_servers = heapless::Vec::new();
+
+    dns_servers.push(Ipv4Address::new(1, 1, 1, 1)).unwrap();
+    dns_servers.push(Ipv4Address::new(1, 0, 0, 1)).unwrap();
+
     let ap_config = embassy_net::Config::ipv4_static(StaticConfigV4 {
         address: GATEWAY_RANGE,
         gateway: Some(GATEWAY_IP),
-        dns_servers: Default::default(),
+        dns_servers,
     });
     let sta_config = embassy_net::Config::dhcpv4(Default::default());
 
     let seed = ((rng.random() as u64) << 32) | rng.random() as u64;
 
-    let ap_stack_res = STACK_RESOUCES_AP.init_with(StackResources::<MAX_SOCKETS_AP>::new);
-    let sta_stack_res = STACK_RESOUCES_STA.init_with(StackResources::<MAX_SOCKETS_STA>::new);
+    let ap_stack_res = STACK_RESOURCES_AP.init_with(StackResources::<MAX_SOCKETS_AP>::new);
+    let sta_stack_res = STACK_RESOURCES_STA.init_with(StackResources::<MAX_SOCKETS_STA>::new);
 
     let (ap_stack, ap_runner) = embassy_net::new(ap_device, ap_config, ap_stack_res, seed);
     let (sta_stack, sta_runner) = embassy_net::new(sta_device, sta_config, sta_stack_res, seed);
@@ -70,7 +75,7 @@ pub struct WifiStackRunners<'d> {
     pub sta_runner: Runner<'d, WifiDevice<'d>>,
 }
 
-/// Stateful wifi controller that allows for enabling/disabling AP and/or STA modes at runtime.
+/// Stateful Wi-Fi controller that allows for enabling/disabling AP and/or STA modes at runtime.
 pub struct WifiController<'d> {
     pub ap_stack: Stack<'d>,
     pub sta_stack: Stack<'d>,
@@ -106,7 +111,7 @@ impl<'d> WifiController<'d> {
         Ok(())
     }
 
-    /// Runs the wifi access point (AP mode) and/or a connection to an external access point (STA mode).
+    /// Runs the Wi-Fi access point (AP mode) and/or a connection to an external access point (STA mode).
     /// Returns only when both AP and STA modes are externally stopped.
     pub async fn run(&mut self) -> Result<(), WifiError> {
         let config = self.create_config();
@@ -191,7 +196,7 @@ impl<'d> WifiController<'d> {
                     }
                 }
                 _ => {
-                    // station mode not started yet
+                    // station mode isn't started yet
                     info!("wifi STA: starting controller...");
                     if let Err(e) = ctrl.lock().await.start_async().await {
                         error!(
