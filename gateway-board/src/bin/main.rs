@@ -11,6 +11,7 @@ use esp_hal::{
     rng::Rng,
     timer::timg::TimerGroup,
 };
+use gateway_board::config::CONFIG;
 
 #[embassy_executor::task]
 #[cfg(feature = "display-ssd1306")]
@@ -146,18 +147,11 @@ async fn setup_wifi(spawner: Spawner, timg0: TIMG0, rng: RNG, radio_clk: RADIO_C
     let (mut wifi_ctrl, wifi_runners) = gateway_board::net::init_wifi(esp_wifi_ctrl, rng, wifi)
         .expect("failed to initialize wifi stack");
 
-    const WIFI_STA_SSID: Option<&'static str> = option_env!("WIFI_STA_SSID");
-    const WIFI_STA_PASS: Option<&'static str> = option_env!("WIFI_STA_PASS");
-    const WIFI_AP_SSID: &str = match option_env!("WIFI_AP_SSID") {
-        Some(ssid) => ssid,
-        None => "lora-gateway-wifi",
-    };
-
     wifi_ctrl
-        .enable_ap(WIFI_AP_SSID)
+        .enable_ap(CONFIG.wifi_ap_ssid)
         .expect("AP configuration failed");
 
-    match (WIFI_STA_SSID, WIFI_STA_PASS) {
+    match (CONFIG.wifi_sta_ssid, CONFIG.wifi_sta_pass) {
         (None, Some(_)) => warn!("not connecting to wifi: missing SSID"),
         (Some(_), None) => warn!("not connecting to wifi: missing password"),
         (None, None) => warn!("not connecting to wifi: missing SSID and password"),
