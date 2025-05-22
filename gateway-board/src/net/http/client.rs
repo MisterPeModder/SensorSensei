@@ -1,5 +1,7 @@
 use super::{HttpMethod, SOCKET_TIMEOUT};
 use crate::net::tcp::BoxedTcpSocket;
+use alloc::fmt;
+use core::ops::{Deref, DerefMut};
 use defmt::{error, info, trace};
 use embassy_net::dns::DnsQueryType;
 use embassy_net::tcp::ConnectError;
@@ -16,24 +18,24 @@ use thiserror::Error;
 /// use embedded_io_async::Write;
 /// use gateway_board::net::http::{HttpClient, HttpMethod};
 ///
-/// let client = HttpClient::new(network_stack);
+/// let mut client = HttpClient::new(network_stack);
 ///
 /// // Start POST request
 /// let mut request = client.request(HttpMethod::Post, "example.com", 80, "/").await.unwrap();
 ///
 /// // Add headers
-/// request.add("Content-Type", "application/json").await.unwrap();
-/// request.add("Content-Length", "14").await.unwrap();
+/// request.header("Content-Type", "application/json").await.unwrap();
+/// request.header("User-Agent", "http-demo").await.unwrap();
 ///
 /// // Write request body
-/// let mut body = request.body().await.unwrap();
-/// body.write_all(br#"{"key":"value}"#).await.unwrap();
+/// request.body().extend_from_slice(br#"{"key":"value}"#);
 ///
-/// let response = body.finish().await.unwrap();
+/// let response = request.finish().await.unwrap();
 /// assert_eq!(response.status(), 200);
 /// # }
 pub struct HttpClient<'a> {
     stack: Stack<'a>,
+    body_buf: alloc::vec::Vec<u8>,
 }
 
 #[derive(Debug, Error)]
@@ -52,12 +54,9 @@ pub enum HttpClientError {
     DnsError,
 }
 
-pub struct HttpRequestHeaders<'a> {
+pub struct HttpRequest<'a> {
     socket: BoxedTcpSocket<'a>,
-}
-
-pub struct HttpRequestBody<'a> {
-    socket: BoxedTcpSocket<'a>,
+    body: &'a mut HttpBody,
 }
 
 pub struct HttpResponse {
@@ -66,16 +65,19 @@ pub struct HttpResponse {
 
 impl<'a> HttpClient<'a> {
     pub fn new(stack: Stack<'a>) -> Self {
-        HttpClient { stack }
+        HttpClient {
+            stack,
+            body_buf: alloc::vec::Vec::new(),
+        }
     }
 
-    pub async fn request(
-        &self,
+    pub async fn request<'b>(
+        &'b mut self,
         method: HttpMethod,
         host: &str,
         port: u16,
         path: impl AsRef<[u8]>,
-    ) -> Result<HttpRequestHeaders<'a>, HttpClientError> {
+    ) -> Result<HttpRequest<'b>, HttpClientError> {
         info!("http-client: DNS lookup for {}...", host);
         let address = match self.stack.dns_query(host, DnsQueryType::A).await {
             Ok(res) => res[0],
@@ -96,14 +98,17 @@ impl<'a> HttpClient<'a> {
         socket.write_all(path.as_ref()).await?;
         socket.write_all(b" HTTP/1.0\r\n").await?;
 
-        let mut headers = HttpRequestHeaders { socket };
-        headers.add(b"Host", host.as_bytes()).await?;
+        let mut headers = HttpRequest {
+            socket,
+            body: HttpBody::from_mut_vec(&mut self.body_buf),
+        };
+        headers.header(b"Host", host.as_bytes()).await?;
         Ok(headers)
     }
 }
 
-impl<'a> HttpRequestHeaders<'a> {
-    pub async fn add(
+impl HttpRequest<'_> {
+    pub async fn header(
         &mut self,
         name: impl AsRef<[u8]>,
         value: impl AsRef<[u8]>,
@@ -115,40 +120,67 @@ impl<'a> HttpRequestHeaders<'a> {
         Ok(())
     }
 
-    pub async fn body(mut self) -> Result<HttpRequestBody<'a>, HttpClientError> {
-        self.socket.write_all(b"\r\n").await?;
-        Ok(HttpRequestBody {
-            socket: self.socket,
-        })
+    pub fn body(&mut self) -> &mut HttpBody {
+        self.body
     }
-}
 
-impl HttpRequestBody<'_> {
     pub async fn finish(mut self) -> Result<HttpResponse, HttpClientError> {
+        use core::fmt::Write;
+
+        let mut content_len_str: heapless::String<10> = heapless::String::new();
+        _ = write!(&mut content_len_str, "{}", self.body.len());
+        self.header("Content-Length", content_len_str).await?;
+        self.socket.write_all(b"\r\n").await?;
+        self.socket.write_all(self.body).await?;
         self.socket.flush().await?;
         info!("http: request finished, waiting for response");
         HttpResponse::read(self.socket).await
     }
 }
 
-impl embedded_io_async::ErrorType for HttpRequestBody<'_> {
-    type Error = embassy_net::tcp::Error;
+#[repr(transparent)]
+pub struct HttpBody(alloc::vec::Vec<u8>);
+
+impl fmt::Write for HttpBody {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.as_mut().extend_from_slice(s.as_bytes());
+        Ok(())
+    }
 }
 
-impl embedded_io_async::Write for HttpRequestBody<'_> {
-    #[inline]
-    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        self.socket.write(buf).await
+impl HttpBody {
+    #[inline(always)]
+    pub const fn from_mut_vec(vec: &mut alloc::vec::Vec<u8>) -> &mut HttpBody {
+        unsafe { core::mem::transmute(vec) }
     }
+}
 
-    #[inline]
-    async fn flush(&mut self) -> Result<(), Self::Error> {
-        self.socket.flush().await
+impl Deref for HttpBody {
+    type Target = alloc::vec::Vec<u8>;
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        self.as_ref()
     }
+}
 
-    #[inline]
-    async fn write_all(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
-        self.socket.write_all(buf).await
+impl DerefMut for HttpBody {
+    fn deref_mut(&mut self) -> &mut <Self as Deref>::Target {
+        self.as_mut()
+    }
+}
+
+impl AsRef<alloc::vec::Vec<u8>> for HttpBody {
+    #[inline(always)]
+    fn as_ref(&self) -> &alloc::vec::Vec<u8> {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+
+impl AsMut<alloc::vec::Vec<u8>> for HttpBody {
+    #[inline(always)]
+    fn as_mut(&mut self) -> &mut alloc::vec::Vec<u8> {
+        unsafe { core::mem::transmute(self) }
     }
 }
 

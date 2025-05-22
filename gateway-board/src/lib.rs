@@ -1,7 +1,10 @@
 #![no_std]
 
+extern crate alloc;
+
 #[cfg(feature = "display-ssd1306")]
 pub mod display;
+mod export;
 #[cfg(feature = "lora")]
 pub mod lora;
 #[cfg(feature = "wifi")]
