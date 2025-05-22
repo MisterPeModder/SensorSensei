@@ -2,6 +2,7 @@
 
 extern crate alloc;
 
+pub mod config;
 #[cfg(feature = "display-ssd1306")]
 pub mod display;
 mod export;
