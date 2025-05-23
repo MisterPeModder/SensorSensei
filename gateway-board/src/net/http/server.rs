@@ -29,11 +29,10 @@ impl<'a> HttpServer<'a> {
                 let address = config.address.address();
                 break address;
             }
-            Timer::after(Duration::from_millis(500)).await;
+            sta_stack.wait_config_up().await;
         };
-        while !(ap_stack.is_link_up() && sta_stack.is_link_up()) {
-            Timer::after(Duration::from_millis(500)).await;
-        }
+        ap_stack.wait_link_up().await;
+        sta_stack.wait_link_up().await;
 
         let endpoint = IpListenEndpoint { addr: None, port };
         let mut ap_socket = BoxedTcpSocket::new(ap_stack).expect("ap_socket: alloc failure");

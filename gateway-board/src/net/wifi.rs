@@ -1,5 +1,5 @@
 use defmt::{error, info, warn, Debug2Format};
-use embassy_net::{Runner, Stack, StackResources, StaticConfigV4};
+use embassy_net::{DhcpConfig, Runner, Stack, StackResources, StaticConfigV4};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use embassy_time::{Duration, Timer};
 use enumset::{enum_set, EnumSet};
@@ -46,9 +46,9 @@ pub fn init_wifi<'d>(
         gateway: Some(GATEWAY_IP),
         dns_servers,
     });
-    let sta_config = embassy_net::Config::dhcpv4(Default::default());
+    let sta_config = embassy_net::Config::dhcpv4(DhcpConfig::default());
 
-    let seed = ((rng.random() as u64) << 32) | rng.random() as u64;
+    let seed = (u64::from(rng.random()) << 32) | u64::from(rng.random());
 
     let ap_stack_res = STACK_RESOURCES_AP.init_with(StackResources::<MAX_SOCKETS_AP>::new);
     let sta_stack_res = STACK_RESOURCES_STA.init_with(StackResources::<MAX_SOCKETS_STA>::new);
@@ -231,10 +231,10 @@ impl<'d> WifiController<'d> {
             warn!("disconnected from AP");
         }
         if events.contains(WifiEvent::ApStaconnected) {
-            info!("wifi AP: new client connected")
+            info!("wifi AP: new client connected");
         }
         if events.contains(WifiEvent::ApStaconnected) {
-            info!("wifi AP: client disconnected")
+            info!("wifi AP: client disconnected");
         }
     }
 
