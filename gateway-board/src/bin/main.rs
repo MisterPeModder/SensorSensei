@@ -1,9 +1,8 @@
 #![no_std]
 #![no_main]
 
-use defmt::{error, info, warn, Debug2Format};
+use defmt::{info, warn};
 use embassy_executor::Spawner;
-use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
 use esp_hal::{
     clock::CpuClock,
@@ -11,7 +10,9 @@ use esp_hal::{
     rng::Rng,
     timer::timg::TimerGroup,
 };
-use gateway_board::config::CONFIG;
+use gateway_board::{config::CONFIG, ValueChannel, ValueReceiver, ValueSender};
+use protocol::app::v1::{SensorValue, SensorValuePoint};
+use static_cell::StaticCell;
 
 #[embassy_executor::task]
 #[cfg(feature = "display-ssd1306")]
@@ -23,7 +24,7 @@ async fn display_things(hardware: gateway_board::display::GatewayDisplayHardware
 #[embassy_executor::task]
 async fn run_wifi_controller(mut controller: gateway_board::net::WifiController<'static>) {
     info!("start wifi task");
-    controller.run().await.expect("error while running wifi")
+    controller.run().await.expect("error while running wifi");
 }
 
 #[cfg(feature = "wifi")]
@@ -53,30 +54,33 @@ async fn run_http(
 
 #[cfg(feature = "wifi")]
 #[embassy_executor::task]
-async fn run_http_client(ap_stack: embassy_net::Stack<'static>) -> ! {
-    Timer::after(Duration::from_millis(10_000)).await;
+async fn export_values(
+    sta_stack: embassy_net::Stack<'static>,
+    mut value_receiver: ValueReceiver,
+) -> ! {
+    use gateway_board::export;
+
+    let mut value_buf: heapless::Vec<SensorValuePoint, { VALUE_CHANNEL_SIZE * 2 }> =
+        heapless::Vec::new();
+
     loop {
-        info!("http-client: attempting request");
-        if let Err(e) = gateway_board::net::http_client_demo(ap_stack).await {
-            error!("http-client: error: {}", Debug2Format(&e));
-        }
-        Timer::after(Duration::from_millis(5000)).await;
+        let values = export::collect_values(&mut value_buf, &mut value_receiver).await;
+        export::export_to_all(sta_stack, values).await;
     }
 }
 
 #[cfg(feature = "wifi")]
-static ESP_WIFI_CTRL: static_cell::StaticCell<esp_wifi::EspWifiController<'static>> =
-    static_cell::StaticCell::new();
+static ESP_WIFI_CTRL: StaticCell<esp_wifi::EspWifiController<'static>> = StaticCell::new();
 
 #[cfg(feature = "lora")]
 #[embassy_executor::task]
-async fn run_lora(hardware: gateway_board::lora::LoraHardware) {
+async fn run_lora(hardware: gateway_board::lora::LoraHardware, sender: ValueSender) {
     use gateway_board::lora::LoraController;
 
-    let mut lora = LoraController::new(hardware)
+    let mut lora = LoraController::new(hardware, sender)
         .await
         .expect("failed to initialize LoRa");
-    lora.run().await.expect("error while setting LoRa recieve");
+    lora.run().await;
 }
 
 #[esp_hal_embassy::main]
@@ -102,6 +106,8 @@ async fn main(spawner: Spawner) {
 
     info!("HAL intialized!");
 
+    let (value_sender, value_receiver) = make_value_channel();
+
     #[cfg(feature = "wifi")]
     setup_wifi(
         spawner,
@@ -109,8 +115,8 @@ async fn main(spawner: Spawner) {
         peripherals.RNG,
         peripherals.RADIO_CLK,
         peripherals.WIFI,
-    )
-    .await;
+        value_receiver,
+    );
 
     #[cfg(feature = "display-ssd1306")]
     spawner.must_spawn(display_things(
@@ -124,20 +130,30 @@ async fn main(spawner: Spawner) {
     ));
 
     #[cfg(feature = "lora")]
-    spawner.must_spawn(run_lora(gateway_board::lora::LoraHardware {
-        spi: peripherals.SPI2,
-        spi_nss: peripherals.GPIO8,
-        spi_scl: peripherals.GPIO9,
-        spi_mosi: peripherals.GPIO10,
-        spi_miso: peripherals.GPIO11,
-        reset: peripherals.GPIO12,
-        busy: peripherals.GPIO13,
-        dio1: peripherals.GPIO14,
-    }));
+    spawner.must_spawn(run_lora(
+        gateway_board::lora::LoraHardware {
+            spi: peripherals.SPI2,
+            spi_nss: peripherals.GPIO8,
+            spi_scl: peripherals.GPIO9,
+            spi_mosi: peripherals.GPIO10,
+            spi_miso: peripherals.GPIO11,
+            reset: peripherals.GPIO12,
+            busy: peripherals.GPIO13,
+            dio1: peripherals.GPIO14,
+        },
+        value_sender,
+    ));
 }
 
 #[cfg(feature = "wifi")]
-async fn setup_wifi(spawner: Spawner, timg0: TIMG0, rng: RNG, radio_clk: RADIO_CLK, wifi: WIFI) {
+fn setup_wifi(
+    spawner: Spawner,
+    timg0: TIMG0,
+    rng: RNG,
+    radio_clk: RADIO_CLK,
+    wifi: WIFI,
+    value_receiver: ValueReceiver,
+) {
     let timg0 = TimerGroup::new(timg0);
     let rng = Rng::new(rng);
 
@@ -170,5 +186,28 @@ async fn setup_wifi(spawner: Spawner, timg0: TIMG0, rng: RNG, radio_clk: RADIO_C
     spawner.must_spawn(run_dhcp(ap_stack));
     spawner.must_spawn(run_wifi_controller(wifi_ctrl));
     spawner.must_spawn(run_http(ap_stack, sta_stack));
-    spawner.must_spawn(run_http_client(sta_stack));
+    spawner.must_spawn(export_values(sta_stack, value_receiver));
+}
+
+const VALUE_CHANNEL_SIZE: usize = 4;
+
+/// Create a pair and sender/receiver for sensor values.
+/// The channel itself is a singleton allocated in static memory, calling this function twice will result in a panic.
+fn make_value_channel() -> (ValueSender, ValueReceiver) {
+    static VALUE_CHANNEL_BUF: StaticCell<[SensorValuePoint; VALUE_CHANNEL_SIZE]> =
+        StaticCell::new();
+    static VALUE_CHANNEL: StaticCell<ValueChannel> = StaticCell::new();
+
+    const DUMMY_VALUE: SensorValuePoint = SensorValuePoint {
+        value: SensorValue::Unknown {
+            id: 255,
+            value_len: 0,
+        },
+        time_offset: -99,
+    };
+
+    let value_channel: &'static mut ValueChannel = VALUE_CHANNEL.init_with(|| {
+        ValueChannel::new(VALUE_CHANNEL_BUF.init_with(|| [DUMMY_VALUE; VALUE_CHANNEL_SIZE]))
+    });
+    value_channel.split()
 }

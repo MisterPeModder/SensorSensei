@@ -64,6 +64,7 @@ pub struct HttpResponse {
 }
 
 impl<'a> HttpClient<'a> {
+    #[must_use]
     pub fn new(stack: Stack<'a>) -> Self {
         HttpClient {
             stack,
@@ -89,7 +90,7 @@ impl<'a> HttpClient<'a> {
 
         info!("http-client: connecting to {}", endpoint);
         let mut socket =
-            BoxedTcpSocket::new(self.stack).map_err(|_| HttpClientError::AllocationFailure)?;
+            BoxedTcpSocket::new(self.stack).map_err(|()| HttpClientError::AllocationFailure)?;
         socket.set_timeout(Some(SOCKET_TIMEOUT));
         socket.connect(endpoint).await?;
 
@@ -97,6 +98,8 @@ impl<'a> HttpClient<'a> {
         socket.write_all(b" ").await?;
         socket.write_all(path.as_ref()).await?;
         socket.write_all(b" HTTP/1.0\r\n").await?;
+
+        self.body_buf.clear();
 
         let mut headers = HttpRequest {
             socket,
@@ -149,38 +152,54 @@ impl fmt::Write for HttpBody {
 }
 
 impl HttpBody {
-    #[inline(always)]
+    #[inline]
     pub const fn from_mut_vec(vec: &mut alloc::vec::Vec<u8>) -> &mut HttpBody {
+        // SAFETY: HttpBody has the same memory layout as Vec<u8> due to repr(transparent)
         unsafe { core::mem::transmute(vec) }
+    }
+
+    #[inline]
+    #[must_use]
+    pub const fn as_vec(&self) -> &alloc::vec::Vec<u8> {
+        // SAFETY: HttpBody has the same memory layout as Vec<u8> due to repr(transparent)
+        unsafe { core::mem::transmute(self) }
+    }
+
+    #[inline]
+    #[must_use]
+    pub const fn as_mut_vec(&mut self) -> &mut alloc::vec::Vec<u8> {
+        // SAFETY: HttpBody has the same memory layout as Vec<u8> due to repr(transparent)
+        unsafe { core::mem::transmute(self) }
     }
 }
 
 impl Deref for HttpBody {
     type Target = alloc::vec::Vec<u8>;
 
-    #[inline(always)]
+    #[inline]
     fn deref(&self) -> &Self::Target {
-        self.as_ref()
+        self.as_vec()
     }
 }
 
 impl DerefMut for HttpBody {
+    #[inline]
     fn deref_mut(&mut self) -> &mut <Self as Deref>::Target {
-        self.as_mut()
+        self.as_mut_vec()
     }
 }
 
 impl AsRef<alloc::vec::Vec<u8>> for HttpBody {
-    #[inline(always)]
+    #[inline]
     fn as_ref(&self) -> &alloc::vec::Vec<u8> {
-        unsafe { core::mem::transmute(self) }
+        self.as_vec()
     }
 }
 
 impl AsMut<alloc::vec::Vec<u8>> for HttpBody {
-    #[inline(always)]
+    #[inline]
     fn as_mut(&mut self) -> &mut alloc::vec::Vec<u8> {
-        unsafe { core::mem::transmute(self) }
+        self.as_mut_vec()
     }
 }
 
@@ -256,6 +275,7 @@ impl HttpResponse {
 
 impl HttpResponse {
     #[inline]
+    #[must_use]
     pub fn status(&self) -> u16 {
         self.status
     }
