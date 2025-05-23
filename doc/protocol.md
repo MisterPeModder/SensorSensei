@@ -55,7 +55,7 @@ Here are the recommended LoRa parameters for the Unnamed Protocol Stack:
 The linking is divided into two phases and a config:
 
 - **Config**: Both client and gateway has to be given matching pair of key to sign the exchange
-- **Handshake Phase**: The client initiates the connection by asking an ID to the gateway. He has to to send a fingerprint and hash it to ensure integrity.
+- **Handshake Phase**: The client initiates the connection by asking an ID to the gateway. He has to send a fingerprint and hash it to ensure integrity.
 The gateway responds with an ID and the same fingerprint and hash it with the ID.
 - **Data send**: After a successful handshake, the client can send data to the gateway and then receive data from the gateway.
 
@@ -66,11 +66,11 @@ A packet can be :
 - **Uplink** : Sensor board to gateway 
 - **Downlink** : Gateway to sensor board
 
-Every packet follow this pattern
+Every packet follows this pattern
 
 ![Protocol Stack](./diagrams/link-layer-datagram.svg)
 
-- The two first bits represente the action. 
+- The two first bits represent the action. 
   - First bit is used to switch between handshake phase or data send.
   - Second bit is for future.
 - The next four bits are used to identify the sensor board. This ID is given by the gateway.
@@ -78,14 +78,14 @@ Every packet follow this pattern
 
 ### 3.2.1 Handshake Phase
 
-The sensor board MUST initiate the ask of an ID by sending a packet as follow:
+The sensor board MUST initiate the request of an ID by sending a packet as follow:
 
 - action bits : 10
 - ID : 0000
 - signature : signature of the fingerprint
 - payload : a fingerprint (SHOULD be a MAC address)
 
-If the gateway doesn't have any ID slot left, it give the last assigned ID. It send a packet as follow:
+If the gateway doesn't have any ID slot left, it gives the last assigned ID. It sends a packet as follow:
 
 - action bits : 10
 - ID : the new sensor board ID
@@ -94,7 +94,7 @@ If the gateway doesn't have any ID slot left, it give the last assigned ID. It s
 
 ### 3.2.2 Data Send
 
-Once handshake done, both board can send a packet as follow:
+Once handshake is done, both board can send a packet as follow:
 
 - action bits : 00
 - ID : the sensor board ID
