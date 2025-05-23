@@ -90,6 +90,9 @@ async fn take_measurements(
     .into_async();
 
     let mut bmp = BMP280::new(i2c).unwrap();
+
+    info!("ID of BMP chip, {}", bmp.id());
+
     let mut dust_sensor = Gp2y1014au::new(
         Gp2y1014auHardware {
             adci,
@@ -112,8 +115,8 @@ async fn take_measurements(
             }
         }
         // Read BMP280 sensor
-        let pressure = bmp.pressure() as f32;
-        let temperature = bmp.temp() as f32;
+        let pressure = bmp.pressure_one_shot() as f32;
+        let temperature = bmp.temp_one_shot() as f32;
         info!("Measured pressure: {}Pa", pressure);
         info!("Measured temperature: {}°C", temperature);
         _ = producer.enqueue(SensorValue::Pressure(pressure));
