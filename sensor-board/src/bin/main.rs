@@ -21,6 +21,7 @@ use sensor_board::{
     lora::{LoraController, LoraHardware},
     PROTOCOL_VERSION_MAJOR, PROTOCOL_VERSION_MINOR,
 };
+use static_cell::StaticCell;
 
 const VALUES_QUEUE_SIZE: usize = 4;
 const VALUES_MEASURE_INTERVAL: u64 = 10;
@@ -45,16 +46,8 @@ async fn main(spawner: Spawner) {
     .await
     .unwrap();
 
-    let values_queue: &'static mut Queue<SensorValue, VALUES_QUEUE_SIZE> = {
-        static mut Q: Queue<SensorValue, VALUES_QUEUE_SIZE> = Queue::new();
-        // SAFETY:
-        // This looks very janky, but it is the recommended way to create a queue in the `heapless` docs
-        // It is not undefined behavior because this is the *only* possible reference to this global variable.
-        #[allow(static_mut_refs)]
-        unsafe {
-            &mut Q
-        }
-    };
+    static VALUES_QUEUE: StaticCell<Queue<SensorValue, VALUES_QUEUE_SIZE>> = StaticCell::new();
+    let values_queue: &'static mut _ = VALUES_QUEUE.init_with(Queue::new);
 
     let (producer, consumer) = values_queue.split();
 
