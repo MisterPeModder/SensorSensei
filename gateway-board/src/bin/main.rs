@@ -10,7 +10,10 @@ use esp_hal::{
     rng::Rng,
     timer::timg::TimerGroup,
 };
-use gateway_board::{config::CONFIG, ValueChannel, ValueReceiver, ValueSender};
+use gateway_board::{
+    config::{get_config, init_config},
+    ValueChannel, ValueReceiver, ValueSender,
+};
 use protocol::app::v1::{SensorValue, SensorValuePoint};
 use static_cell::StaticCell;
 
@@ -85,6 +88,8 @@ async fn run_lora(hardware: gateway_board::lora::LoraHardware, sender: ValueSend
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
+    // Initialize the gateway board configuration structure.
+    init_config();
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
@@ -116,7 +121,8 @@ async fn main(spawner: Spawner) {
         peripherals.RADIO_CLK,
         peripherals.WIFI,
         value_receiver,
-    );
+    )
+    .await;
 
     #[cfg(feature = "display-ssd1306")]
     spawner.must_spawn(display_things(
@@ -146,7 +152,7 @@ async fn main(spawner: Spawner) {
 }
 
 #[cfg(feature = "wifi")]
-fn setup_wifi(
+async fn setup_wifi(
     spawner: Spawner,
     timg0: TIMG0,
     rng: RNG,
@@ -161,13 +167,17 @@ fn setup_wifi(
         esp_wifi::init(timg0.timer0, rng, radio_clk).expect("failed to init ESP wifi controller")
     });
     let (mut wifi_ctrl, wifi_runners) = gateway_board::net::init_wifi(esp_wifi_ctrl, rng, wifi)
+        .await
         .expect("failed to initialize wifi stack");
 
     wifi_ctrl
-        .enable_ap(CONFIG.wifi_ap_ssid)
+        .enable_ap(get_config().await.wifi_ap_ssid)
         .expect("AP configuration failed");
 
-    match (CONFIG.wifi_sta_ssid, CONFIG.wifi_sta_pass) {
+    match (
+        get_config().await.wifi_sta_ssid,
+        get_config().await.wifi_sta_pass,
+    ) {
         (None, Some(_)) => warn!("not connecting to wifi: missing SSID"),
         (Some(_), None) => warn!("not connecting to wifi: missing password"),
         (None, None) => warn!("not connecting to wifi: missing SSID and password"),
