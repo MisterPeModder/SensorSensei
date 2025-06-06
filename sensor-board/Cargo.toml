@@ -31,8 +31,8 @@ embassy-embedded-hal = { version = "0.3.0", features = ["defmt"] }
 embassy-executor = { version = "0.7.0", features = ["defmt", "task-arena-size-16384"] }
 embassy-sync = "0.6.2"
 embassy-time = { version = "0.4.0", features = ["generic-queue-64"] }
-esp-hal = { version = "1.0.0-beta.0", features = ["esp32", "defmt", "unstable"] }
-esp-hal-embassy = { version = "0.7.0", features = ["esp32"] }
+esp-hal = { git = "https://github.com/esp-rs/esp-hal.git", tag = "esp-hal-v1.0.0-beta.0",  features = ["esp32", "defmt", "unstable"] }
+esp-hal-embassy = { git = "https://github.com/esp-rs/esp-hal.git", tag = "esp-hal-v1.0.0-beta.0",  features = ["esp32"], package = "esp-hal-embassy" }
 esp-println = { version = "0.13.1", features = ["esp32", "defmt-espflash"] }
 lora-phy = { version = "3.0.1", optional = true }
 protocol = { path = "../protocol" }

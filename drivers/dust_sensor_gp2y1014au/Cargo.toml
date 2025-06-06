@@ -5,7 +5,11 @@ edition = "2021"
 
 [dependencies]
 embassy-time = { version = "0.4.0", features = ["generic-queue-64"] }
-esp-hal = { version = "1.0.0-beta.0", features = ["esp32", "defmt", "unstable"] }
+esp-hal = { git = "https://github.com/esp-rs/esp-hal.git", tag = "esp-hal-v1.0.0-beta.0", features = [
+    "esp32",
+    "defmt",
+    "unstable"
+] }
 embedded-hal = "1.0.0"
 nb = "1.1.0"
 embassy-futures = "0.1.1"
