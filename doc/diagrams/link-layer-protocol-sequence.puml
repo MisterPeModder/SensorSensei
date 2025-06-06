@@ -1,0 +1,30 @@
+@startuml IoT902-SeqDiag-ProtoPhy
+
+
+
+participant SensorBoard as S
+participant GatewayBoard as G
+
+hnote over S, G : config matching keys
+
+== Handshake phase ==
+S -> G : <b>askId</b> fingerprint, hashed fingerprint
+alt
+S <-- G : <b>assignId</b> fingerprint, hashed (fingerprint + id)
+else Timeout
+S --X G
+end
+
+...
+
+== Payload Exchange ==
+
+S -> S : <b>addData</b> send_buffer
+
+group while [not freed send_buffer] 
+S -> S : <b>sliceData</b> send_buffer
+
+S -> G : <b>sendPayload</b> data 
+G --> G : <b>addData</b> receive_buffer 
+end
+@enduml

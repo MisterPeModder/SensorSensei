@@ -46,7 +46,60 @@ Here are the recommended LoRa parameters for the Unnamed Protocol Stack:
 
 # 3 Link Layer Protocol
 
-**TBD**
+## 3.1 Timing
+
+<p align="center">
+<img alt="application layer protocol timing" height="500" src="./diagrams/link-layer-protocol-sequence.png">
+</p>
+
+The linking is divided into two phases and a config:
+
+- **Config**: Both client and gateway has to be given matching pair of key to sign the exchange
+- **Handshake Phase**: The client initiates the connection by asking an ID to the gateway. He has to send a fingerprint and hash it to ensure integrity.
+The gateway responds with an ID and the same fingerprint and hash it with the ID.
+- **Data send**: After a successful handshake, the client can send data to the gateway and then receive data from the gateway.
+
+## 3.2 Packet Types & Format
+
+The link layer use the modulation of the Lora to implement a master/slave way to dialogue between boards.
+A packet can be :
+- **Uplink** : Sensor board to gateway 
+- **Downlink** : Gateway to sensor board
+
+Every packet follows this pattern
+
+![Protocol Stack](./diagrams/link-layer-datagram.svg)
+
+- The two first bits represent the action. 
+  - First bit is used to switch between handshake phase or data send.
+  - Second bit is for future.
+- The next four bits are used to identify the sensor board. This ID is given by the gateway.
+- The next thirty four bits are used to sign the payload and ensure authenticity of the data. The signature MUST be a SHA-256 hash (truncated from MSB).
+
+### 3.2.1 Handshake Phase
+
+The sensor board MUST initiate the request of an ID by sending a packet as follow:
+
+- action bits : 10
+- ID : 0000
+- signature : signature of the fingerprint
+- payload : a fingerprint (SHOULD be a MAC address)
+
+If the gateway doesn't have any ID slot left, it gives the last assigned ID. It sends a packet as follow:
+
+- action bits : 10
+- ID : the new sensor board ID
+- signature : signature of (fingerprint + ID)
+- payload : the same fingerprint sent by the sensorboard
+
+### 3.2.2 Data Send
+
+Once handshake is done, both board can send a packet as follow:
+
+- action bits : 00
+- ID : the sensor board ID
+- signature : signature of the payload
+- payload : data to send
 
 # 4 Application Layer Protocol
 
