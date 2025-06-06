@@ -64,3 +64,12 @@ Flashing with wifi support only:
 ```shell
 cargo run --target="xtensa-esp32-none-elf" --no-default-features --features="board-esp32dev"
 ```
+
+### InfluxDB Dashboard
+
+To enable the InfluxDB dashboard, you need to set the following environment variables while building.
+
+- INFLUXDB_HOST
+- INFLUXDB_API_TOKEN
+- INFLUXDB_ORG
+- INFLUXDB_BUCKET
