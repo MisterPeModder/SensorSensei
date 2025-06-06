@@ -13,7 +13,7 @@ use esp_wifi::{
 };
 use static_cell::StaticCell;
 
-use crate::config::CONFIG;
+use crate::config::get_config;
 
 use super::{GATEWAY_IP, GATEWAY_RANGE};
 
@@ -27,8 +27,8 @@ static STACK_RESOURCES_STA: StaticCell<StackResources<MAX_SOCKETS_STA>> = Static
 #[derive(Debug)]
 pub struct WifiConfigurationError;
 
-pub fn init_wifi<'d>(
-    esp_wifi_ctrl: &'d mut EspWifiController,
+pub async fn init_wifi<'d>(
+    esp_wifi_ctrl: &'d mut EspWifiController<'_>,
     mut rng: Rng,
     wifi: impl Peripheral<P = WIFI> + 'd,
 ) -> Result<(WifiController<'d>, WifiStackRunners<'d>), WifiError> {
@@ -38,8 +38,8 @@ pub fn init_wifi<'d>(
 
     let mut dns_servers = heapless::Vec::new();
 
-    dns_servers.push(CONFIG.dns_server_1).unwrap();
-    dns_servers.push(CONFIG.dns_server_2).unwrap();
+    dns_servers.push(get_config().await.dns_server_1).unwrap();
+    dns_servers.push(get_config().await.dns_server_2).unwrap();
 
     let ap_config = embassy_net::Config::ipv4_static(StaticConfigV4 {
         address: GATEWAY_RANGE,
