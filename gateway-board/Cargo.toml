@@ -9,7 +9,6 @@ path = "./src/bin/main.rs"
 
 [features]
 default = ["board-heltec-lora32v3", "display-ssd1306", "lora", "wifi"]
-
 board-esp32dev = [
   "esp-backtrace/esp32",
   "esp-hal/esp32",
@@ -59,19 +58,27 @@ embassy-time = { version = "0.4.0", features = ["defmt"] }
 embedded-hal-async = "1.0.0"
 embedded-io-async = "0.6.1"
 enumset = "1.1.5"
-esp-alloc = "0.7.0"
-esp-backtrace = { version = "0.15.0", features = [
+esp-hal = { git = "https://github.com/esp-rs/esp-hal.git", tag = "esp-hal-v1.0.0-beta.0", features = [
+  "unstable"
+] }
+esp-hal-embassy = { git = "https://github.com/esp-rs/esp-hal.git", tag = "esp-hal-v1.0.0-beta.0", features = [
+], package = "esp-hal-embassy" }
+esp-wifi = { git = "https://github.com/esp-rs/esp-hal.git", tag = "esp-hal-v1.0.0-beta.0", optional = true, features = [
+  "defmt",
+  "wifi"
+], package = "esp-wifi" }
+esp-alloc = { git = "https://github.com/esp-rs/esp-hal.git", tag = "esp-hal-v1.0.0-beta.0", package = "esp-alloc" }
+esp-println = { git = "https://github.com/esp-rs/esp-hal.git", tag = "esp-hal-v1.0.0-beta.0", features = [
+  "defmt-espflash"
+], package = "esp-println" }
+esp-backtrace = { git = "https://github.com/esp-rs/esp-hal.git", tag = "esp-hal-v1.0.0-beta.0", features = [
   "exception-handler",
   "panic-handler",
   "println",
-] }
-esp-hal = { version = "1.0.0-beta.0", features = ["unstable"] }
-esp-hal-embassy = { version = "0.7.0", features = [] }
-esp-println = { version = "0.13.0", features = ["defmt-espflash"] }
-esp-wifi = { version = "0.13.0", optional = true, features = ["defmt", "wifi"] }
+], package = "esp-backtrace" }
 heapless = { version = "0.8.0", optional = true }
 lora-phy = { version = "3.0.1", optional = true }
-memchr = { version = "2.7.4" , default-features = false }
+memchr = { version = "2.7.4", default-features = false }
 portable-atomic = "1.11.0"
 protocol = { path = "../protocol" }
 thiserror = { version = "2.0.12", default-features = false }
@@ -84,7 +91,7 @@ static_cell = "2.1.0"
 opt-level = "s"
 
 [profile.release]
-codegen-units = 1        # LLVM can perform better optimizations using a single thread
+codegen-units = 1 # LLVM can perform better optimizations using a single thread
 debug = 2
 debug-assertions = false
 incremental = false
