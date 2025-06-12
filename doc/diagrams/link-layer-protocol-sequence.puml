@@ -1,4 +1,4 @@
-@startuml IoT902-SeqDiag-ProtoPhy
+@startuml link-layer-protocol-sequence
 
 
 
@@ -21,7 +21,7 @@ end
 
 S -> S : <b>addData</b> send_buffer
 
-group while [not freed send_buffer] 
+group while [send_buffer is not empty] 
 S -> S : <b>sliceData</b> send_buffer
 
 S -> G : <b>sendPayload</b> data 
