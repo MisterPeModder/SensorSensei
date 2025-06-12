@@ -52,7 +52,7 @@ async fn run_http(
     sta_stack: embassy_net::Stack<'static>,
 ) -> ! {
     let mut server = gateway_board::net::http::HttpServer::new(ap_stack, sta_stack, 80).await;
-    server.run().await
+    server.run_demo().await
 }
 
 #[cfg(feature = "wifi")]

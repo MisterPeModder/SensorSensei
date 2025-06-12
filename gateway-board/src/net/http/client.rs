@@ -54,12 +54,12 @@ pub enum HttpClientError {
     DnsError,
 }
 
-pub struct HttpRequest<'a> {
+pub struct HttpClientRequest<'a> {
     socket: BoxedTcpSocket<'a>,
     body: &'a mut HttpBody,
 }
 
-pub struct HttpResponse {
+pub struct HttpClientResponse {
     status: u16,
 }
 
@@ -78,7 +78,7 @@ impl<'a> HttpClient<'a> {
         host: &str,
         port: u16,
         path: impl AsRef<[u8]>,
-    ) -> Result<HttpRequest<'b>, HttpClientError> {
+    ) -> Result<HttpClientRequest<'b>, HttpClientError> {
         info!("http-client: DNS lookup for {}...", host);
         let address = match self.stack.dns_query(host, DnsQueryType::A).await {
             Ok(res) => res[0],
@@ -101,7 +101,7 @@ impl<'a> HttpClient<'a> {
 
         self.body_buf.clear();
 
-        let mut headers = HttpRequest {
+        let mut headers = HttpClientRequest {
             socket,
             body: HttpBody::from_mut_vec(&mut self.body_buf),
         };
@@ -110,7 +110,7 @@ impl<'a> HttpClient<'a> {
     }
 }
 
-impl HttpRequest<'_> {
+impl HttpClientRequest<'_> {
     pub async fn header(
         &mut self,
         name: impl AsRef<[u8]>,
@@ -127,7 +127,7 @@ impl HttpRequest<'_> {
         self.body
     }
 
-    pub async fn finish(mut self) -> Result<HttpResponse, HttpClientError> {
+    pub async fn finish(mut self) -> Result<HttpClientResponse, HttpClientError> {
         use core::fmt::Write;
 
         let mut content_len_str: heapless::String<10> = heapless::String::new();
@@ -137,7 +137,7 @@ impl HttpRequest<'_> {
         self.socket.write_all(self.body).await?;
         self.socket.flush().await?;
         info!("http: request finished, waiting for response");
-        HttpResponse::read(self.socket).await
+        HttpClientResponse::read(self.socket).await
     }
 }
 
@@ -217,15 +217,7 @@ impl From<embassy_net::tcp::Error> for HttpClientError {
     }
 }
 
-impl AsRef<str> for HttpMethod {
-    fn as_ref(&self) -> &str {
-        match self {
-            HttpMethod::Post => "POST",
-        }
-    }
-}
-
-impl HttpResponse {
+impl HttpClientResponse {
     async fn read(mut socket: BoxedTcpSocket<'_>) -> Result<Self, HttpClientError> {
         let mut buf = [0u8; 128];
 
@@ -250,7 +242,7 @@ impl HttpResponse {
             // we have the status, consume the rest of the response
         }
 
-        Ok(HttpResponse { status })
+        Ok(HttpClientResponse { status })
     }
 
     async fn read_line(
@@ -273,7 +265,7 @@ impl HttpResponse {
     }
 }
 
-impl HttpResponse {
+impl HttpClientResponse {
     #[inline]
     #[must_use]
     pub fn status(&self) -> u16 {
