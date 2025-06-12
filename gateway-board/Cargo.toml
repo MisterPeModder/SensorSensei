@@ -84,6 +84,7 @@ protocol = { path = "../protocol", features = ["defmt"] }
 thiserror = { version = "2.0.12", default-features = false }
 ssd1306 = { version = "0.10.0", optional = true, features = ["async"] }
 static_cell = "2.1.0"
+util = { path = "../util" }
 
 [profile.dev]
 # Rust debug is too slow.
