@@ -5,7 +5,7 @@ use defmt::{error, info, Format};
 use embassy_futures::select::Either;
 use embassy_net::{tcp::TcpSocket, IpListenEndpoint, Stack};
 use embassy_time::{Duration, Timer};
-use embedded_io_async::Write;
+use embedded_io_async::{Read, Write};
 
 /// Dummy dual-stack HTTP server.
 ///
@@ -21,6 +21,7 @@ pub struct HttpServer<'a> {
 
 pub struct HttpServerRequest<'a, 'r> {
     method: HttpMethod,
+    body: &'r mut [u8],
     sock: &'r mut TcpSocket<'a>,
 }
 
@@ -87,6 +88,8 @@ impl<'a> HttpServer<'a> {
             "http-server: running on port {}, STA address is {}",
             self.endpoint.port, self.sta_address
         );
+
+        let mut buffer = heapless::Vec::<u8, 1024>::new();
         loop {
             info!("http-server: waiting for connection");
 
@@ -109,7 +112,7 @@ impl<'a> HttpServer<'a> {
                 }
             };
 
-            match Self::handle_client_request(sock, &mut handler).await {
+            match Self::handle_client_request(sock, &mut handler, &mut buffer).await {
                 Ok(res) => {
                     info!("http-server: client response: {:?}", res.status);
                 }
@@ -128,28 +131,52 @@ impl<'a> HttpServer<'a> {
     async fn handle_client_request<'r, H>(
         sock: &'r mut TcpSocket<'a>,
         handler: &mut H,
+        buffer: &'r mut heapless::Vec<u8, 1024>,
     ) -> Result<HttpServerResponse<'a, 'r>, HttpServerError>
     where
         H: AsyncFnMut(
             HttpServerRequest<'a, 'r>,
         ) -> Result<HttpServerResponse<'a, 'r>, HttpServerError>,
     {
-        let mut buffer = heapless::Vec::<u8, 1024>::new();
-
-        let method_end = Self::read_until_byte(sock, &mut buffer, b' ').await?;
+        buffer.clear();
+        let method_end = Self::read_until_byte(sock, buffer, b' ').await?;
         let Ok(method) = HttpMethod::try_from(&buffer[..method_end]) else {
             let mut res = HttpServerResponse::new(sock);
             res.return_bad_request().await?;
             return Ok(res);
         };
-        Self::shift_buffer(&mut buffer, method_end + 1);
+        Self::shift_buffer(buffer, method_end + 1);
 
-        // discard all the headers
-        Self::read_until_bytes(sock, &mut buffer, b"\r\n\r\n").await?;
+        // Read the Content-Length header, expecting 'Content-Length: ' (other formats are not supported).
+        let content_length_start =
+            Self::read_until_bytes(sock, buffer, b"Content-Length: ").await?;
+        Self::shift_buffer(buffer, content_length_start + 16); // 16 is the length of "Content-Length: "
+        let content_length_end = Self::read_until_byte(sock, buffer, b'\r').await?;
 
-        // FIXME: we don't care about the bodies for now
+        let Some(content_length) = core::str::from_utf8(&buffer[..content_length_end])
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+        else {
+            let mut res = HttpServerResponse::new(sock);
+            res.return_bad_request().await?;
+            return Ok(res);
+        };
 
-        let req = HttpServerRequest { method, sock };
+        // discard other headers
+        let headers_end = Self::read_until_bytes(sock, buffer, b"\r\n\r\n").await?;
+
+        if content_length > 0 {
+            Self::shift_buffer(buffer, headers_end + 4); // 4 is the length of "\r\n\r\n"
+            sock.read_exact(&mut buffer[..content_length])
+                .await
+                .map_err(|_| HttpServerError::SocketError)?;
+        }
+
+        let req = HttpServerRequest {
+            method,
+            body: &mut buffer[..content_length],
+            sock,
+        };
         handler(req).await
     }
 
@@ -240,6 +267,10 @@ impl<'a, 'r> HttpServerRequest<'a, 'r> {
         self.method
     }
 
+    pub fn body(&mut self) -> &mut [u8] {
+        self.body
+    }
+
     pub fn new_response(self) -> HttpServerResponse<'a, 'r> {
         HttpServerResponse::new(self.sock)
     }
@@ -258,8 +289,16 @@ impl<'a, 'r> HttpServerResponse<'a, 'r> {
             .map_err(|_| HttpServerError::SocketError)
     }
 
+    pub async fn return_not_found(&mut self) -> Result<(), HttpServerError> {
+        self.status = 404;
+        self.sock
+            .write_all(b"HTTP/1.0 400 Not Found\r\n\r\n")
+            .await
+            .map_err(|_| HttpServerError::SocketError)
+    }
+
     /// FIXME: remove this (and the index.html file) once unused
-    async fn return_dummy_page(&mut self) -> Result<(), HttpServerError> {
+    pub async fn return_dummy_page(&mut self) -> Result<(), HttpServerError> {
         self.status = 200;
         self.sock
             .write_all(concat!("HTTP/1.0 200 OK\r\n\r\n", include_str!("index.html")).as_bytes())

@@ -1,6 +1,9 @@
 use defmt::{error, info, warn, Debug2Format};
 use embassy_net::{DhcpConfig, Runner, Stack, StackResources, StaticConfigV4};
-use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
+use embassy_sync::{
+    blocking_mutex::raw::NoopRawMutex,
+    mutex::{Mutex, MutexGuard},
+};
 use embassy_time::{Duration, Timer};
 use enumset::{enum_set, EnumSet};
 use esp_hal::{peripheral::Peripheral, peripherals::WIFI, rng::Rng};
@@ -13,7 +16,7 @@ use esp_wifi::{
 };
 use static_cell::StaticCell;
 
-use crate::config::get_config;
+use crate::config::CONFIG;
 
 use super::{GATEWAY_IP, GATEWAY_RANGE};
 
@@ -38,8 +41,11 @@ pub async fn init_wifi<'d>(
 
     let mut dns_servers = heapless::Vec::new();
 
-    dns_servers.push(get_config().await.dns_server_1).unwrap();
-    dns_servers.push(get_config().await.dns_server_2).unwrap();
+    MutexGuard::map(CONFIG.lock().await, |config| {
+        dns_servers.push(config.dns_server_1).unwrap();
+        dns_servers.push(config.dns_server_2).unwrap();
+        config
+    });
 
     let ap_config = embassy_net::Config::ipv4_static(StaticConfigV4 {
         address: GATEWAY_RANGE,
