@@ -10,12 +10,32 @@ use esp_hal::{
     rng::Rng,
     timer::timg::TimerGroup,
 };
-use gateway_board::{
-    config::{get_config, init_config},
-    ValueChannel, ValueReceiver, ValueSender,
-};
+use gateway_board::{config::CONFIG, ValueChannel, ValueReceiver, ValueSender};
 use protocol::app::v1::{SensorValue, SensorValuePoint};
 use static_cell::StaticCell;
+
+pub enum ConfigurationVariable {
+    WifiStaSsid,
+    WifiStaPassword,
+    WifiApSsid,
+    DnsServer1,
+    DnsServer2,
+}
+
+impl TryFrom<&[u8]> for ConfigurationVariable {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        match value {
+            b"wifi_sta_ssid" => Ok(ConfigurationVariable::WifiStaSsid),
+            b"wifi_sta_password" => Ok(ConfigurationVariable::WifiStaPassword),
+            b"wifi_ap_ssid" => Ok(ConfigurationVariable::WifiApSsid),
+            b"dns_server_1" => Ok(ConfigurationVariable::DnsServer1),
+            b"dns_server_2" => Ok(ConfigurationVariable::DnsServer2),
+            _ => Err(()),
+        }
+    }
+}
 
 #[embassy_executor::task]
 #[cfg(feature = "display-ssd1306")]
@@ -51,8 +71,113 @@ async fn run_http(
     ap_stack: embassy_net::Stack<'static>,
     sta_stack: embassy_net::Stack<'static>,
 ) -> ! {
+    use core::str::FromStr;
+    use gateway_board::net::http::HttpServerRequest;
+
     let mut server = gateway_board::net::http::HttpServer::new(ap_stack, sta_stack, 80).await;
-    server.run().await
+    server
+        .run(async |mut req: HttpServerRequest| {
+            Ok(match req.method() {
+                // Handle the root path with a dummy page
+                gateway_board::net::http::HttpMethod::Get => {
+                    info!("HTTP GET request, returning form page");
+                    let mut res = req.new_response();
+                    res.return_dummy_page().await?;
+                    res
+                }
+                // Handle the POST method for form submission
+                gateway_board::net::http::HttpMethod::Post => {
+                    info!("HTTP POST request, processing form submission");
+
+                    // FIXME: Lock the config with a mutex while updating it
+                    let config = CONFIG.lock().await;
+
+                    for (key, value) in util::encoding::decode_form_url_encoded(&mut req.body()) {
+                        let config_var = match ConfigurationVariable::try_from(key) {
+                            Ok(k) => k,
+                            Err(_) => {
+                                warn!("Invalid configuration variable name: {:?}", key);
+                                continue;
+                            }
+                        };
+                        let Ok(value_str) = core::str::from_utf8(value) else {
+                            warn!("Invalid UTF-8 in value for {:?}", key);
+                            continue;
+                        };
+
+                        match config_var {
+                            ConfigurationVariable::WifiStaSsid => {
+                                if let Some(valid_ssid) =
+                                    heapless::String::<32>::from_str(value_str).ok()
+                                {
+                                    if valid_ssid.is_empty() {
+                                        info!(
+                                            "Empty WiFi STA SSID received, clearing config value"
+                                        );
+                                        config.wifi_sta_ssid = None;
+                                    } else {
+                                        info!("Setting WiFi STA SSID to: {}", valid_ssid);
+                                        config.wifi_sta_ssid = Some(valid_ssid);
+                                    }
+                                } else {
+                                    warn!("Invalid WiFi STA SSID, keeping current value");
+                                }
+                            }
+                            ConfigurationVariable::WifiStaPassword => {
+                                if let Some(valid_ssid) =
+                                    heapless::String::<64>::from_str(value_str).ok()
+                                {
+                                    if valid_ssid.is_empty() {
+                                        info!(
+                                            "Empty WiFi STA PASS received, clearing config value"
+                                        );
+                                        config.wifi_sta_pass = None;
+                                    } else {
+                                        info!("Updating WiFi STA PASS");
+                                        config.wifi_sta_pass = Some(valid_ssid);
+                                    }
+                                } else {
+                                    warn!("Invalid WiFi STA PASS, keeping current value");
+                                }
+                            }
+                            ConfigurationVariable::WifiApSsid => {
+                                if let Some(ssid) = heapless::String::<32>::from_str(value_str).ok()
+                                {
+                                    info!("Setting WiFi AP SSID to: {}", ssid);
+                                    config.wifi_ap_ssid = ssid;
+                                } else {
+                                    warn!("Invalid WiFi AP SSID, keeping current value");
+                                };
+                            }
+                            ConfigurationVariable::DnsServer1 => {
+                                if let Some(dns_server) = value_str.parse().ok() {
+                                    info!("Setting DNS server 1 to: {}", dns_server);
+                                    config.dns_server_1 = dns_server;
+                                } else {
+                                    warn!("Invalid DNS server 1 address, keeping current value");
+                                }
+                            }
+                            ConfigurationVariable::DnsServer2 => {
+                                if let Some(dns_server) = value_str.parse().ok() {
+                                    info!("Setting DNS server 2 to: {}", dns_server);
+                                    config.dns_server_2 = dns_server;
+                                } else {
+                                    warn!("Invalid DNS server 2 address, keeping current value");
+                                }
+                            }
+                        }
+                    }
+                    let mut res = req.new_response();
+                    info!("Form submission processed successfully");
+                    // Here you would typically process the form data
+                    // For now, we just return a success response
+                    res.return_dummy_page().await?;
+                    res
+                }
+            })
+        })
+        .await
+    // server.run_demo().await
 }
 
 #[cfg(feature = "wifi")]
@@ -88,8 +213,6 @@ async fn run_lora(hardware: gateway_board::lora::LoraHardware, sender: ValueSend
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
-    // Initialize the gateway board configuration structure.
-    init_config();
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
@@ -171,13 +294,12 @@ async fn setup_wifi(
         .expect("failed to initialize wifi stack");
 
     wifi_ctrl
-        .enable_ap(get_config().await.wifi_ap_ssid)
+        .enable_ap(CONFIG.lock().await.wifi_ap_ssid.clone())
         .expect("AP configuration failed");
 
-    match (
-        get_config().await.wifi_sta_ssid,
-        get_config().await.wifi_sta_pass,
-    ) {
+    let wifi_sta_ssid = CONFIG.lock().await.wifi_sta_ssid.clone();
+    let wifi_sta_pass = CONFIG.lock().await.wifi_sta_pass.clone();
+    match (wifi_sta_ssid, wifi_sta_pass) {
         (None, Some(_)) => warn!("not connecting to wifi: missing SSID"),
         (Some(_), None) => warn!("not connecting to wifi: missing password"),
         (None, None) => warn!("not connecting to wifi: missing SSID and password"),
