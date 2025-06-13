@@ -1,5 +1,6 @@
 use embassy_time::Duration;
 
+pub mod api;
 mod client;
 mod server;
 

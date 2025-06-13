@@ -1,6 +1,6 @@
 //! Sensor data exporting
 
-use crate::config::{get_config, InfluxDBConfig};
+use crate::config::{InfluxDBConfig, CONFIG};
 use crate::{
     net::http::{HttpBody, HttpClient, HttpClientError, HttpMethod},
     ValueReceiver,
@@ -19,9 +19,11 @@ pub trait ValuesExporter {
 }
 
 pub struct SensorCommunityExporter;
+
+#[repr(transparent)]
 pub struct InfluxDbExporter {
     /// InfluxDB configuration
-    cfg: &'static InfluxDBConfig,
+    cfg: InfluxDBConfig,
 }
 
 /// Attempts to fetch as many values as possible from `receiver` until either the buffer is full or the channel is empty.
@@ -61,7 +63,8 @@ pub async fn export_to_all(stack: Stack<'_>, values: &[SensorValuePoint]) {
     if let Err(e) = ex.export(&mut client, values).await {
         error!("export: sensor.community: error: {}", Debug2Format(&e));
     }
-    if let Some(cfg) = get_config().await.influx_db.as_ref() {
+    let influx_db_cfg = CONFIG.lock().await.influx_db.clone();
+    if let Some(cfg) = influx_db_cfg {
         let ex = InfluxDbExporter { cfg };
         if let Err(e) = ex.export(&mut client, values).await {
             error!("export: influxdb: error: {}", Debug2Format(&e));
