@@ -6,14 +6,11 @@ use embassy_executor::Spawner;
 use esp_backtrace as _;
 use esp_hal::{
     clock::CpuClock,
-    peripherals::{RADIO_CLK, RNG, TIMG0, WIFI},
+    peripherals::{RADIO_CLK, TIMG0, WIFI},
     rng::Rng,
     timer::timg::TimerGroup,
 };
-use gateway_board::{
-    config::{get_config, init_config},
-    ValueChannel, ValueReceiver, ValueSender,
-};
+use gateway_board::{config::CONFIG, ValueChannel, ValueReceiver, ValueSender};
 use protocol::app::v1::{SensorValue, SensorValuePoint};
 use static_cell::StaticCell;
 
@@ -52,7 +49,9 @@ async fn run_http(
     sta_stack: embassy_net::Stack<'static>,
 ) -> ! {
     let mut server = gateway_board::net::http::HttpServer::new(ap_stack, sta_stack, 80).await;
-    server.run_demo().await
+    server
+        .run(gateway_board::net::http::api::dispatch_http_request)
+        .await
 }
 
 #[cfg(feature = "wifi")]
@@ -88,10 +87,12 @@ async fn run_lora(hardware: gateway_board::lora::LoraHardware, sender: ValueSend
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
-    // Initialize the gateway board configuration structure.
-    init_config();
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
+    let rng_context: Rng = Rng::new(peripherals.RNG);
+
+    // Initialize config struct
+    CONFIG.lock().await.load_from_env(rng_context);
 
     esp_alloc::heap_allocator!(size: 72 * 1024);
 
@@ -117,7 +118,7 @@ async fn main(spawner: Spawner) {
     setup_wifi(
         spawner,
         peripherals.TIMG0,
-        peripherals.RNG,
+        rng_context,
         peripherals.RADIO_CLK,
         peripherals.WIFI,
         value_receiver,
@@ -155,13 +156,12 @@ async fn main(spawner: Spawner) {
 async fn setup_wifi(
     spawner: Spawner,
     timg0: TIMG0,
-    rng: RNG,
+    rng: Rng,
     radio_clk: RADIO_CLK,
     wifi: WIFI,
     value_receiver: ValueReceiver,
 ) {
     let timg0 = TimerGroup::new(timg0);
-    let rng = Rng::new(rng);
 
     let esp_wifi_ctrl = ESP_WIFI_CTRL.init_with(|| {
         esp_wifi::init(timg0.timer0, rng, radio_clk).expect("failed to init ESP wifi controller")
@@ -171,13 +171,12 @@ async fn setup_wifi(
         .expect("failed to initialize wifi stack");
 
     wifi_ctrl
-        .enable_ap(get_config().await.wifi_ap_ssid)
+        .enable_ap(CONFIG.lock().await.wifi_ap_ssid.clone())
         .expect("AP configuration failed");
 
-    match (
-        get_config().await.wifi_sta_ssid,
-        get_config().await.wifi_sta_pass,
-    ) {
+    let wifi_sta_ssid = CONFIG.lock().await.wifi_sta_ssid.clone();
+    let wifi_sta_pass = CONFIG.lock().await.wifi_sta_pass.clone();
+    match (wifi_sta_ssid, wifi_sta_pass) {
         (None, Some(_)) => warn!("not connecting to wifi: missing SSID"),
         (Some(_), None) => warn!("not connecting to wifi: missing password"),
         (None, None) => warn!("not connecting to wifi: missing SSID and password"),
