@@ -1,0 +1,64 @@
+<mxfile host="app.diagrams.net" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36 OPR/119.0.0.0" version="27.1.5">
+  <diagram name="Page-1" id="eavhPGMwy9YKpKgykWjc">
+    <mxGraphModel dx="998" dy="542" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="Pu6c8xTo7z5lnewg2ZwK-1" value="&lt;b&gt;&lt;font style=&quot;font-size: 14px;&quot;&gt;API&lt;/font&gt;&lt;/b&gt;" style="image;points=[];aspect=fixed;html=1;align=center;shadow=0;dashed=0;image=img/lib/allied_telesis/computer_and_terminals/Server_Desktop.svg;labelBackgroundColor=none;fontColor=default;" vertex="1" parent="1">
+          <mxGeometry x="630" y="192" width="42.599999999999994" height="54" as="geometry" />
+        </mxCell>
+        <mxCell id="Pu6c8xTo7z5lnewg2ZwK-3" value="" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#061CA1;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.hardware_board;rotation=-90;" vertex="1" parent="1">
+          <mxGeometry x="414" y="180" width="78" height="78" as="geometry" />
+        </mxCell>
+        <mxCell id="Pu6c8xTo7z5lnewg2ZwK-4" value="" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#000000;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.hardware_board;rotation=-90;" vertex="1" parent="1">
+          <mxGeometry x="206" y="180" width="78" height="78" as="geometry" />
+        </mxCell>
+        <mxCell id="Pu6c8xTo7z5lnewg2ZwK-5" value="" style="endArrow=none;dashed=1;html=1;rounded=0;" edge="1" parent="1" source="Pu6c8xTo7z5lnewg2ZwK-4" target="Pu6c8xTo7z5lnewg2ZwK-3">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="336" y="280" as="sourcePoint" />
+            <mxPoint x="386" y="230" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Pu6c8xTo7z5lnewg2ZwK-6" value="" style="endArrow=none;dashed=1;html=1;rounded=0;" edge="1" parent="1" source="Pu6c8xTo7z5lnewg2ZwK-3" target="Pu6c8xTo7z5lnewg2ZwK-1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="606.6" y="240" as="sourcePoint" />
+            <mxPoint x="768.6" y="240" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Pu6c8xTo7z5lnewg2ZwK-7" value="&lt;b&gt;&lt;font style=&quot;font-size: 15px;&quot;&gt;LoRa&lt;/font&gt;&lt;/b&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="320" y="180" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Pu6c8xTo7z5lnewg2ZwK-10" value="&lt;b&gt;&lt;font style=&quot;font-size: 15px;&quot;&gt;Wi-Fi&lt;/font&gt;&lt;/b&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="530" y="180" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Pu6c8xTo7z5lnewg2ZwK-15" value="&lt;font style=&quot;font-size: 14px; color: rgb(6, 28, 161);&quot;&gt;&lt;b&gt;GatewayBoard&lt;/b&gt;&lt;/font&gt;" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="393" y="258" width="120" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Pu6c8xTo7z5lnewg2ZwK-17" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;&lt;b&gt;SensorBoard&lt;/b&gt;&lt;/font&gt;" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="190" y="258" width="110" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Pu6c8xTo7z5lnewg2ZwK-21" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=none;startFill=0;strokeColor=#67AB9F;" edge="1" parent="1" source="Pu6c8xTo7z5lnewg2ZwK-19" target="Pu6c8xTo7z5lnewg2ZwK-4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Pu6c8xTo7z5lnewg2ZwK-19" value="&lt;font style=&quot;color: rgb(103, 171, 159);&quot;&gt;Dust sensor&lt;/font&gt;" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#67AB9F;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=1;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.iot_thing_vibration_sensor;" vertex="1" parent="1">
+          <mxGeometry x="80" y="144" width="48" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="Pu6c8xTo7z5lnewg2ZwK-22" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=none;startFill=0;strokeColor=#67AB9F;" edge="1" parent="1" source="Pu6c8xTo7z5lnewg2ZwK-20" target="Pu6c8xTo7z5lnewg2ZwK-4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Pu6c8xTo7z5lnewg2ZwK-20" value="&lt;font style=&quot;color: rgb(103, 171, 159);&quot;&gt;Pressure sensor&lt;/font&gt;" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#67AB9F;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=1;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.iot_thing_vibration_sensor;" vertex="1" parent="1">
+          <mxGeometry x="80" y="246" width="48" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="Pu6c8xTo7z5lnewg2ZwK-24" value="" style="shape=image;html=1;verticalAlign=top;verticalLabelPosition=bottom;labelBackgroundColor=#ffffff;imageAspect=0;aspect=fixed;image=https://cdn4.iconfinder.com/data/icons/ionicons/512/icon-battery-half-128.png" vertex="1" parent="1">
+          <mxGeometry x="225" y="140" width="40" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="Pu6c8xTo7z5lnewg2ZwK-26" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=none;startFill=0;strokeColor=#808080;" edge="1" parent="1" source="Pu6c8xTo7z5lnewg2ZwK-25" target="Pu6c8xTo7z5lnewg2ZwK-1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Pu6c8xTo7z5lnewg2ZwK-25" value="&lt;font style=&quot;color: rgb(128, 128, 128);&quot;&gt;&lt;b&gt;Dashboard&lt;/b&gt;&lt;/font&gt;" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#808080;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.opensearch_dashboards;" vertex="1" parent="1">
+          <mxGeometry x="690" y="189.5" width="78" height="59" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
