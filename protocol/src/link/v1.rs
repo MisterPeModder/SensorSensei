@@ -63,9 +63,10 @@ impl<PHY: PhysicalLayer> LinkLayer for DummyLinkLayer<PHY> {
     type SourceId = DummyId;
     type DestId = DummyId;
 
-    async fn read(&mut self, buf: &mut [u8]) -> Result<(usize, Self::SourceId), Self::Error> {
-        let bytes_read = self.phy.recv(buf).await?;
-        Ok((bytes_read, DummyId))
+    async fn read(&mut self, _buf: &mut [u8]) -> Result<(usize, Self::SourceId), Self::Error> {
+        // let bytes_read = self.phy.recv(buf).await?;
+        // Ok((bytes_read, DummyId))
+        todo!()
     }
 
     async fn write(
@@ -93,75 +94,191 @@ impl<PHY: PhysicalLayer> LinkLayer for DummyLinkLayer<PHY> {
         Ok(bytes_sent)
     }
 
-    async fn flush(&mut self, dest: Option<Self::DestId>) -> Result<(), Self::Error> {
-        _ = dest; // no caching
-        let mut buf: &[u8] = &self.tx_buf;
-        while !buf.is_empty() {
-            let bytes_sent = self.phy.send(&self.tx_buf).await?;
-            buf = &buf[bytes_sent..];
-        }
-        self.tx_buf.clear();
+    async fn flush(&mut self, _dest: Option<Self::DestId>) -> Result<(), Self::Error> {
+        // _ = dest; // no caching
+        // let mut buf: &[u8] = &self.tx_buf;
+        // while !buf.is_empty() {
+        //     let bytes_sent = self.phy.send(&self.tx_buf).await?;
+        //     buf = &buf[bytes_sent..];
+        // }
+        // self.tx_buf.clear();
         Ok(())
     }
 }
 
-enum LinkPhase {
+/// *The* Gateway ID, version 1 of the protocol only supports one gateway.
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+pub struct GatewayId;
+
+/// 4-bit ID of a sensor board.
+#[repr(transparent)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+pub struct SensorBoardId(pub u8);
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum LinkPhase {
     Handshake,
     Data,
 }
 
-async fn write_packet<PHY: PhysicalLayer>(
-    mut phy: PHY,
-    phase: LinkPhase,
-    id: u8,
-    sig_key: &[u8],
-    payload: &[u8],
-) -> Result<(), PHY::Error> {
-    let action_bits: u8 = match phase {
-        LinkPhase::Handshake => 0b10,
-        LinkPhase::Data => 0b00,
-    };
-    let mut sig = Hmac::<Sha256>::new_from_slice(sig_key).expect("HMAC should not fail");
-    sig.update(payload);
-    let sig_bytes: [u8; 32] = sig.finalize().into_bytes().into();
+impl LinkPhase {
+    fn to_bits(self) -> u8 {
+        match self {
+            Self::Handshake => 0b10,
+            Self::Data => 0b00,
+        }
+    }
+    fn from_bits(bits: u8) -> Self {
+        if bits == 0b10 {
+            Self::Handshake
+        } else {
+            Self::Data
+        }
+    }
+}
 
-    let sig_bits: u64 = u64::from_be_bytes([
-        sig_bytes[0],
-        sig_bytes[1],
-        sig_bytes[2],
-        sig_bytes[3],
-        sig_bytes[4],
-        0,
-        0,
-        0, // only use the first 5 bytes, zero-extend to 8 bytes
-    ]);
-    let header_meta: u8 = (action_bits << 6) | ((id & 0b1111) << 2); // id (4 bits)
-    let header: u64 = (header_meta as u64) << 56 | (sig_bits >> 6);
+pub struct LinkPacket<'a> {
+    pub phase: LinkPhase,
+    pub id: u8,
+    pub payload: &'a [u8],
+}
 
-    phy.send_exact(&header.to_be_bytes()[..5]).await?;
-    phy.send_exact(payload).await
+impl<'a> LinkPacket<'a> {
+    pub async fn write<PHY: PhysicalLayer>(
+        self,
+        mut phy: PHY,
+        sig_key: &[u8],
+    ) -> Result<(), PHY::Error> {
+        let action_bits: u8 = self.phase.to_bits();
+        let header_meta: u8 = (action_bits << 6) | ((self.id & 0b1111) << 2); // id (4 bits)
+        let sig_bits: u64 = Self::sign_payload(self.payload, sig_key);
+
+        let header: u64 = (header_meta as u64) << 56 | (sig_bits >> 6);
+
+        phy.write(&header.to_be_bytes()[..5]).await?;
+        phy.write(self.payload).await?;
+        phy.flush().await
+    }
+
+    /// Read the next link packet, ignoring malformed packets.
+    /// Returns the link phase and the ID of the packet, for the actual payload use `get_payload()`.
+    ///
+    /// Implentation note: I had to split read() and get_payload() because of the weirdest lifetime errors I've ever seen.
+    /// if you have an afternoon and some sanity to spare, I'd be happy to hear how to fix this.
+    pub async fn read<PHY: PhysicalLayer>(
+        mut phy: PHY,
+        sig_key: &[u8],
+    ) -> Result<(LinkPhase, u8), PHY::Error> {
+        loop {
+            phy.read().await?;
+            let bytes: &[u8] = phy.buffer();
+            if bytes.len() < 6 {
+                // packet too small
+                continue;
+            }
+
+            let header_meta: u8 = bytes[0];
+            let sig_bits: u64 =
+                u64::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], 0, 0, 0])
+                    << 6;
+            let payload = &bytes[5..];
+
+            // first 34 bits of the signature of the actual payload
+            let actual_sig = Self::sign_payload(payload, sig_key) & 0xffffffffc0000000;
+
+            if actual_sig == sig_bits {
+                break Ok((
+                    LinkPhase::from_bits(header_meta >> 6),
+                    (header_meta >> 2) & 0xf,
+                ));
+            }
+            // wrong signature
+        }
+    }
+
+    /// Ugly hack to get around lifetime issues. See the comment in `read()`.
+    pub fn get_payload<PHY: PhysicalLayer>(phy: &'a PHY) -> &'a [u8] {
+        &phy.buffer()[5..]
+    }
+
+    fn sign_payload(payload: &[u8], sig_key: &[u8]) -> u64 {
+        let mut sig = Hmac::<Sha256>::new_from_slice(sig_key).expect("HMAC should not fail");
+        sig.update(payload);
+        let sig_bytes: [u8; 32] = sig.finalize().into_bytes().into();
+
+        // only use the first 5 bytes, zero-extend to 8 bytes
+        u64::from_be_bytes([
+            sig_bytes[0],
+            sig_bytes[1],
+            sig_bytes[2],
+            sig_bytes[3],
+            sig_bytes[4],
+            0,
+            0,
+            0,
+        ])
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::{phy::PhysicalLayer, test::RunBlockingExt};
+    use core::{
+        error::Error,
+        fmt::{Debug, Display, Formatter},
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+    use hex_literal::hex;
 
     #[derive(Default)]
     struct TestingPhy {
+        read_bufs: &'static [&'static [u8]],
+        current_read_buf: AtomicUsize,
+        buf: Vec<u8>,
         sent: Vec<u8>,
     }
 
-    impl PhysicalLayer for TestingPhy {
-        type Error = core::convert::Infallible;
+    #[derive(Debug, PartialEq, Eq)]
+    struct TestingError;
 
-        async fn send(&mut self, data: &[u8]) -> Result<usize, Self::Error> {
-            self.sent.extend_from_slice(data);
-            Ok(data.len())
+    impl Display for TestingError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+            Debug::fmt(self, f)
+        }
+    }
+
+    impl Error for TestingError {}
+
+    impl PhysicalLayer for TestingPhy {
+        type Error = TestingError;
+
+        async fn read(&mut self) -> Result<(), Self::Error> {
+            match self
+                .read_bufs
+                .get(self.current_read_buf.load(Ordering::Relaxed))
+            {
+                Some(_buf) => {
+                    self.current_read_buf.fetch_add(1, Ordering::Relaxed);
+                    Ok(())
+                }
+                None => Err(TestingError),
+            }
         }
 
-        async fn recv(&mut self, _buf: &mut [u8]) -> Result<usize, Self::Error> {
-            Ok(0) // No receiving in this test
+        fn buffer(&self) -> &[u8] {
+            &self.read_bufs[self.current_read_buf.load(Ordering::Relaxed) - 1]
+        }
+
+        async fn write(&mut self, data: &[u8]) -> Result<(), Self::Error> {
+            self.buf.extend_from_slice(data);
+            Ok(())
+        }
+
+        async fn flush(&mut self) -> Result<(), Self::Error> {
+            self.sent.extend_from_slice(&self.buf);
+            self.buf.clear();
+            Ok(())
         }
     }
 
@@ -173,12 +290,13 @@ mod test {
         let secret_key = b"secret key";
         let signature: u64 = 0x86c6662bba4d02ed & !((1u64 << 30) - 1);
 
-        println!("signature: {:016x?}", signature);
+        let packet = LinkPacket {
+            phase: LinkPhase::Handshake,
+            id: 5,
+            payload,
+        };
 
-        assert_eq!(
-            write_packet(&mut phy, LinkPhase::Handshake, 5u8, secret_key, payload).run_blocking(),
-            Ok(())
-        );
+        assert_eq!(packet.write(&mut phy, secret_key).run_blocking(), Ok(()));
 
         let encoded: &[u8] = &phy.sent;
         assert_eq!(encoded.len(), 5 + payload.len());
@@ -197,5 +315,46 @@ mod test {
         assert_eq!(&encoded[5..], payload.as_ref());
 
         println!("{:x?}", actual_sig);
+    }
+
+    const LINK_PACKET_VALID: [u8; 24] = hex!("961b1998ae7468697320697320746865207061796c6f6164");
+    const LINK_PACKET_BAD_SIG: [u8; 24] = hex!("932b1998ae7468697320697320746865207061796c6f6164");
+
+    #[test]
+    fn test_link_packet_decoding_bad_packets() {
+        let mut phy = TestingPhy::default();
+        let secret_key = b"secret key";
+
+        phy.read_bufs = &[b"", b"short", &LINK_PACKET_BAD_SIG];
+        assert!(LinkPacket::read(&mut phy, secret_key.as_ref())
+            .run_blocking()
+            .is_err());
+    }
+
+    #[test]
+    fn test_link_packet_decoding_invalid_key() {
+        let mut phy = TestingPhy::default();
+        let secret_key = b"not the secret key";
+
+        phy.read_bufs = &[&LINK_PACKET_VALID];
+        assert!(LinkPacket::read(&mut phy, secret_key.as_ref())
+            .run_blocking()
+            .is_err());
+    }
+
+    #[test]
+    fn test_link_packet_decoding_valid() {
+        let mut phy = TestingPhy::default();
+        let secret_key = b"secret key";
+
+        phy.read_bufs = &[b"", b"short", &LINK_PACKET_BAD_SIG, &LINK_PACKET_VALID];
+
+        let Ok(packet) = LinkPacket::read(&mut phy, secret_key.as_ref()).run_blocking() else {
+            panic!("Failed to read valid packet");
+        };
+
+        assert!(packet.0 == LinkPhase::Handshake);
+        assert_eq!(packet.1, 5);
+        assert_eq!(LinkPacket::get_payload(&phy), b"this is the payload");
     }
 }

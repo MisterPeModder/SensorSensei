@@ -1,9 +1,9 @@
-use core::future::Future;
-use defmt::{error, Format};
+use defmt::{error, info, Format};
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use embassy_time::Delay;
 use esp_hal::{
+    efuse::Efuse,
     gpio::{GpioPin, Input, InputConfig, Level, Output, OutputConfig},
     peripherals::SPI2,
     spi::Mode,
@@ -18,7 +18,11 @@ use lora_phy::{
     sx127x::{self, Sx1276, Sx127x},
     LoRa,
 };
-use protocol::phy::PhysicalLayer;
+use protocol::link::v1::LinkPacket;
+use protocol::{
+    link::v1::{GatewayId, LinkLayer, LinkPhase, SensorBoardId},
+    phy::PhysicalLayer,
+};
 use static_cell::StaticCell;
 use thiserror::Error;
 
@@ -65,6 +69,8 @@ pub enum LoraError {
     Config(#[from] esp_hal::spi::master::ConfigError),
     #[error("radio error: {0:?}")]
     Radio(RadioError),
+    #[error("buffer overflow")]
+    BufferOverflow,
 }
 
 impl From<RadioError> for LoraError {
@@ -147,18 +153,18 @@ impl LoraController {
         })
     }
 
-    pub async fn send(&mut self, buffer: &[u8]) -> Result<usize, LoraError> {
+    async fn send(&mut self) -> Result<(), LoraError> {
         self.lora
             .prepare_for_tx(
                 &self.modulation_params,
                 &mut self.tx_packet_params,
                 20,
-                buffer,
+                &self.rx_buffer,
             )
             .await?;
 
         self.lora.tx().await?;
-        Ok(buffer.len())
+        Ok(())
     }
 
     async fn recv(&mut self) -> Result<(), LoraError> {
@@ -191,23 +197,91 @@ impl LoraController {
 impl PhysicalLayer for LoraController {
     type Error = LoraError;
 
-    fn send(&mut self, data: &[u8]) -> impl Future<Output = Result<usize, Self::Error>> {
-        LoraController::send(self, data)
+    async fn read(&mut self) -> Result<(), Self::Error> {
+        self.rx_buffer.clear();
+        self.recv().await?;
+        Ok(())
     }
 
-    async fn recv(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+    fn buffer(&self) -> &[u8] {
+        &self.rx_buffer
+    }
+
+    async fn write(&mut self, data: &[u8]) -> Result<(), Self::Error> {
+        self.rx_buffer
+            .extend_from_slice(data)
+            .map_err(|_| LoraError::BufferOverflow)
+    }
+
+    async fn flush(&mut self) -> Result<(), Self::Error> {
         if self.rx_buffer.is_empty() {
-            self.recv().await?;
+            return Ok(());
         }
-        if self.rx_buffer.is_empty() {
-            Ok(0)
-        } else {
-            // pop at most `buf.len()` bytes from the buffer
-            let len = buf.len().min(self.rx_buffer.len());
-            buf[..len].copy_from_slice(&self.rx_buffer[..len]);
-            self.rx_buffer.copy_within(len.., 0);
-            self.rx_buffer.truncate(self.rx_buffer.len() - len);
-            Ok(len)
+        self.send().await
+    }
+}
+
+struct SensorBoardLinkLayer<PHY> {
+    phase: LinkPhase,
+    phy: PHY,
+}
+
+impl<PHY: PhysicalLayer> SensorBoardLinkLayer<PHY> {
+    async fn connect(&mut self) -> Result<(), PHY::Error> {
+        if let LinkPhase::Data = self.phase {
+            // Already connected, no need to do anything
+            return Ok(());
         }
+
+        info!("link: connecting to gateway...");
+        while !self.try_connect().await? {
+            info!("link: connection failed, trying again in 2 seconds...");
+            embassy_time::Timer::after(embassy_time::Duration::from_secs(2)).await;
+        }
+        info!("link: connection successfully connected");
+        self.phase = LinkPhase::Data;
+        Ok(())
+    }
+
+    async fn try_connect(&mut self) -> Result<bool, PHY::Error> {
+        // TODO(protocol): specify that MAC address is 6 bytes
+        let mac = Efuse::read_base_mac_address();
+
+        LinkPacket {
+            phase: LinkPhase::Handshake,
+            id: 0,
+            payload: &mac,
+        }
+        .write(&mut self.phy, b"SECRET")
+        .await?;
+
+        let response = LinkPacket::read(&mut self.phy, b"SECRET").await?;
+        let payload = LinkPacket::get_payload(&self.phy);
+
+        Ok(response.0 == LinkPhase::Handshake && response.1 == 0 && payload == mac)
+    }
+}
+
+impl<PHY: PhysicalLayer> LinkLayer for SensorBoardLinkLayer<PHY> {
+    type Error = PHY::Error;
+    type SourceId = GatewayId;
+    type DestId = SensorBoardId;
+
+    async fn read(&mut self, buf: &mut [u8]) -> Result<(usize, Self::SourceId), Self::Error> {
+        self.connect().await?;
+        todo!()
+    }
+
+    async fn write(
+        &mut self,
+        dest: Option<Self::DestId>,
+        buf: &[u8],
+    ) -> Result<usize, Self::Error> {
+        self.connect().await?;
+        todo!()
+    }
+
+    async fn flush(&mut self, dest: Option<Self::DestId>) -> Result<(), Self::Error> {
+        todo!()
     }
 }

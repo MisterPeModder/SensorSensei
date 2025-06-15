@@ -1,4 +1,3 @@
-use core::future::Future;
 use defmt::{error, info, warn, Debug2Format, Format};
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
@@ -75,6 +74,8 @@ pub enum LoraError {
     Config(#[from] esp_hal::spi::master::ConfigError),
     #[error("radio error: {0:?}")]
     Radio(RadioError),
+    #[error("buffer overflow")]
+    BufferOverflow,
 }
 
 impl From<RadioError> for LoraError {
@@ -227,18 +228,18 @@ impl LoraController {
         }
     }
 
-    pub async fn send(&mut self, buffer: &[u8]) -> Result<usize, LoraError> {
+    pub async fn send(&mut self) -> Result<(), LoraError> {
         self.lora
             .prepare_for_tx(
                 &self.modulation_params,
                 &mut self.tx_packet_params,
                 20,
-                buffer,
+                &self.rx_buffer,
             )
             .await?;
 
         self.lora.tx().await?;
-        Ok(buffer.len())
+        Ok(())
     }
 
     async fn recv(&mut self) -> Result<(), LoraError> {
@@ -267,23 +268,26 @@ impl LoraController {
 impl PhysicalLayer for LoraController {
     type Error = LoraError;
 
-    fn send(&mut self, data: &[u8]) -> impl Future<Output = Result<usize, Self::Error>> {
-        LoraController::send(self, data)
+    async fn read(&mut self) -> Result<(), Self::Error> {
+        self.rx_buffer.clear();
+        self.recv().await?;
+        Ok(())
     }
 
-    async fn recv(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+    fn buffer(&self) -> &[u8] {
+        &self.rx_buffer
+    }
+
+    async fn write(&mut self, data: &[u8]) -> Result<(), Self::Error> {
+        self.rx_buffer
+            .extend_from_slice(data)
+            .map_err(|_| LoraError::BufferOverflow)
+    }
+
+    async fn flush(&mut self) -> Result<(), Self::Error> {
         if self.rx_buffer.is_empty() {
-            self.recv().await?;
+            return Ok(());
         }
-        if self.rx_buffer.is_empty() {
-            Ok(0)
-        } else {
-            // pop at most `buf.len()` bytes from the buffer
-            let len = buf.len().min(self.rx_buffer.len());
-            buf[..len].copy_from_slice(&self.rx_buffer[..len]);
-            self.rx_buffer.copy_within(len.., 0);
-            self.rx_buffer.truncate(self.rx_buffer.len() - len);
-            Ok(len)
-        }
+        self.send().await
     }
 }

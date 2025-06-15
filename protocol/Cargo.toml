@@ -8,3 +8,6 @@ heapless = "0.8.0"
 hmac = { version = "0.12.1", default-features = false }
 sha2 = { version = "0.10.9", default-features = false }
 thiserror = { version = "2.0.12", default-features = false }
+
+[dev-dependencies]
+hex-literal = "1.0.0"
