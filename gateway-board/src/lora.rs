@@ -1,7 +1,8 @@
-use defmt::{error, info, warn, Debug2Format, Format};
+use defmt::{error, trace, Format};
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
+use embassy_futures::select::Either;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
-use embassy_time::{Delay, Instant};
+use embassy_time::Delay;
 use esp_hal::{
     gpio::{GpioPin, Input, InputConfig, Level, Output, OutputConfig},
     peripherals::SPI2,
@@ -17,28 +18,20 @@ use lora_phy::{
     sx126x::{self, Sx1262, Sx126x, TcxoCtrlVoltage},
     LoRa,
 };
-use protocol::app::v1::{
-    DummyAppLayer, DummyAppLayerError, HandshakeEnd, HandshakeStart, Packet, SensorData,
-    SensorValuePoint,
-};
-use protocol::codec::{AsyncDecoder, AsyncEncoder};
-use protocol::link::v1::{DummyLinkLayer, LinkLayer};
 use protocol::phy::PhysicalLayer;
 use static_cell::StaticCell;
 use thiserror::Error;
 
-use crate::{ValueSender, PROTOCOL_VERSION_MAJOR, PROTOCOL_VERSION_MINOR};
-
 /// Channel to use, should be "unique". Use same frequencies as other devices causes spurious packets.
-const LORA_FREQUENCY_IN_HZ: u32 = 868_200_000;
+pub const LORA_FREQUENCY_IN_HZ: u32 = 868_200_000;
 /// Channel width. Lower values increase time on air, but may be able to find clear frequencies.
-const LORA_BANDWITH: Bandwidth = Bandwidth::_250KHz;
+pub const LORA_BANDWITH: Bandwidth = Bandwidth::_250KHz;
 /// Controls the forward error correction. Higher values are more robust, but reduces the ratio
 /// of actual data in transmissions.
-const LORA_CODING_RATE: CodingRate = CodingRate::_4_8;
+pub const LORA_CODING_RATE: CodingRate = CodingRate::_4_8;
 /// Controls the chirp rate. Lower values are slower bandwidth (longer time on air), but more robust.
-const LORA_SPREADING_FACTOR: SpreadingFactor = SpreadingFactor::_10;
-const LORA_RX_BUF_SIZE: usize = 128;
+pub const LORA_SPREADING_FACTOR: SpreadingFactor = SpreadingFactor::_10;
+pub const LORA_RX_BUF_SIZE: usize = 128;
 
 pub struct LoraHardware {
     pub spi: SPI2,
@@ -64,7 +57,7 @@ pub struct LoraController {
     tx_packet_params: PacketParams,
     rx_packet_params: PacketParams,
     rx_buffer: heapless::Vec<u8, LORA_RX_BUF_SIZE>,
-    value_sender: Option<ValueSender>,
+    tx_buffer: heapless::Vec<u8, LORA_RX_BUF_SIZE>,
 }
 
 /// One-stop shop for LoRa-related errors
@@ -87,7 +80,7 @@ impl From<RadioError> for LoraError {
 static SPI_BUS: StaticCell<Mutex<NoopRawMutex, AsyncSpi>> = StaticCell::new();
 
 impl LoraController {
-    pub async fn new(hardware: LoraHardware, value_sender: ValueSender) -> Result<Self, LoraError> {
+    pub async fn new(hardware: LoraHardware) -> Result<Self, LoraError> {
         // The SPI bus used by the lora dio is exclusive to it.
         // No need to use mutexes or other synchonization
         let spi: AsyncSpi = esp_hal::spi::master::Spi::new(
@@ -158,74 +151,8 @@ impl LoraController {
             tx_packet_params,
             rx_packet_params,
             rx_buffer: heapless::Vec::new(),
-            value_sender: Some(value_sender),
+            tx_buffer: heapless::Vec::new(),
         })
-    }
-
-    /// Listens for LoRa packets in an infinite loop.
-    pub async fn run(&mut self) -> ! {
-        let mut value_sender = self.value_sender.take().expect("broken: no sender");
-        let link = DummyLinkLayer::new(self);
-        let mut app = DummyAppLayer::new(link);
-
-        loop {
-            if let Err(err) = Self::comm_cycle(&mut app, &mut value_sender).await {
-                error!("comm error: {:?}", Debug2Format(&err));
-            }
-        }
-    }
-
-    async fn comm_cycle<LINK: LinkLayer>(
-        app: &mut DummyAppLayer<LINK>,
-        value_sender: &mut ValueSender,
-    ) -> Result<(), DummyAppLayerError<LINK::Error>> {
-        info!("Waiting for client handshake...");
-
-        match app.read::<Packet>().await? {
-            Packet::HandshakeStart(HandshakeStart { major, minor }) if major != 1 => {
-                return Err(DummyAppLayerError::IncompatibleProtocol(major, minor))
-            }
-            Packet::HandshakeStart(_) => (),
-            pkt => return Err(DummyAppLayerError::UnexpectedPacket(pkt.id())),
-        }
-
-        let epoch = Instant::now();
-        app.emit(&Packet::HandshakeEnd(HandshakeEnd {
-            major: PROTOCOL_VERSION_MAJOR,
-            minor: PROTOCOL_VERSION_MINOR,
-            epoch: epoch.as_millis(),
-        }))
-        .await?;
-        app.flush().await?;
-
-        info!("Client handshake complete, waiting for sensor data...");
-
-        loop {
-            let count = match app.read::<Packet>().await? {
-                Packet::SensorData(SensorData { count }) => count,
-                pkt => return Err(DummyAppLayerError::UnexpectedPacket(pkt.id())),
-            };
-
-            for _ in 0..count {
-                // Send values to other thread for exporting
-                if let Some(value_point) = value_sender.try_send() {
-                    *value_point = app.read::<SensorValuePoint>().await?;
-                    value_sender.send_done();
-                } else {
-                    let value_point = app.read::<SensorValuePoint>().await?;
-                    warn!(
-                        "lora: dropping value #{=u32} (at T+{=i64}): queue is full",
-                        value_point.value.id(),
-                        value_point.time_offset
-                    );
-                }
-            }
-            embassy_time::Timer::after(embassy_time::Duration::from_secs(2)).await;
-            info!("Done receiving sensor data, sending ack");
-
-            app.emit(&Packet::Ack).await?;
-            app.flush().await?;
-        }
     }
 
     pub async fn send(&mut self) -> Result<(), LoraError> {
@@ -234,11 +161,14 @@ impl LoraController {
                 &self.modulation_params,
                 &mut self.tx_packet_params,
                 20,
-                &self.rx_buffer,
+                &self.tx_buffer,
             )
             .await?;
 
+        trace!("phy: sending {=usize} bytes", self.tx_buffer.len());
         self.lora.tx().await?;
+        self.tx_buffer.clear();
+        trace!("phy: done sending");
         Ok(())
     }
 
@@ -254,13 +184,33 @@ impl LoraController {
         unsafe {
             self.rx_buffer.set_len(LORA_RX_BUF_SIZE);
         }
-        let (received_len, _rx_pkt_status) = self
-            .lora
-            .rx(&self.rx_packet_params, &mut self.rx_buffer)
-            .await?;
-        unsafe {
-            self.rx_buffer.set_len(received_len as usize);
+        trace!("phy: waiting for data (timeout in 5 seconds)");
+
+        let res = embassy_futures::select::select(
+            self.lora.rx(&self.rx_packet_params, &mut self.rx_buffer),
+            embassy_time::Timer::after(embassy_time::Duration::from_secs(5)),
+        )
+        .await;
+
+        match res {
+            Either::First(x) => {
+                let (received_len, rx_pkt_status) = x?;
+                unsafe {
+                    self.rx_buffer.set_len(received_len as usize);
+                }
+                trace!(
+                    "phy: received packet of length {=usize} (rssi: {=i16}, snr: {=i16})",
+                    self.rx_buffer.len(),
+                    rx_pkt_status.rssi,
+                    rx_pkt_status.snr
+                );
+            }
+            Either::Second(()) => {
+                trace!("phy: timeout while waiting for data");
+                self.rx_buffer.clear();
+            }
         }
+
         Ok(())
     }
 }
@@ -274,18 +224,18 @@ impl PhysicalLayer for LoraController {
         Ok(())
     }
 
-    fn buffer(&self) -> &[u8] {
+    fn rx_buffer(&self) -> &[u8] {
         &self.rx_buffer
     }
 
     async fn write(&mut self, data: &[u8]) -> Result<(), Self::Error> {
-        self.rx_buffer
+        self.tx_buffer
             .extend_from_slice(data)
             .map_err(|_| LoraError::BufferOverflow)
     }
 
     async fn flush(&mut self) -> Result<(), Self::Error> {
-        if self.rx_buffer.is_empty() {
+        if self.tx_buffer.is_empty() {
             return Ok(());
         }
         self.send().await

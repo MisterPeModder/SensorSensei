@@ -7,6 +7,8 @@ use protocol::app::v1::SensorValuePoint;
 
 extern crate alloc;
 
+#[cfg(feature = "lora")]
+pub mod comm;
 pub mod config;
 #[cfg(feature = "display-ssd1306")]
 pub mod display;

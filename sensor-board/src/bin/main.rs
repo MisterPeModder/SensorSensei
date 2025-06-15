@@ -2,29 +2,17 @@
 #![no_main]
 
 use bmp280_ehal::BMP280;
-use defmt::{error, info, Debug2Format};
+use defmt::info;
 use dust_sensor_gp2y1014au::{Gp2y1014au, Gp2y1014auHardware};
 use embassy_executor::Spawner;
-use embassy_time::Instant;
 use esp_hal::gpio::GpioPin;
 use esp_hal::peripherals::{ADC2, I2C0};
 use esp_hal::{clock::CpuClock, i2c::master::I2c, time::Rate, timer::timg::TimerGroup};
 use esp_println as _;
 use heapless::spsc::{Consumer, Producer, Queue};
-use protocol::app::v1::{
-    DummyAppLayer, DummyAppLayerError, HandshakeEnd, HandshakeStart, Packet, SensorData,
-    SensorValue, SensorValuePoint,
-};
-use protocol::codec::{AsyncDecoder, AsyncEncoder};
-use protocol::link::v1::{DummyLinkLayer, LinkLayer};
-use sensor_board::{
-    lora::{LoraController, LoraHardware},
-    PROTOCOL_VERSION_MAJOR, PROTOCOL_VERSION_MINOR,
-};
-
-const VALUES_QUEUE_SIZE: usize = 4;
-const VALUES_MEASURE_INTERVAL: u64 = 10;
-const VALUES_SEND_INTERVAL: u64 = 5;
+use protocol::app::v1::SensorValue;
+use sensor_board::comm::app::{VALUES_MEASURE_INTERVAL, VALUES_QUEUE_SIZE};
+use sensor_board::lora::{LoraController, LoraHardware};
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
@@ -131,82 +119,9 @@ async fn take_measurements(
 #[embassy_executor::task]
 async fn communicate(
     lora: LoraController,
-    mut consumer: Consumer<'static, SensorValue, VALUES_QUEUE_SIZE>,
+    consumer: Consumer<'static, SensorValue, VALUES_QUEUE_SIZE>,
 ) -> ! {
-    let link = DummyLinkLayer::new(lora);
-    let mut app = DummyAppLayer::new(link);
-
-    loop {
-        if let Err(err) = comm_cycle(&mut app, &mut consumer).await {
-            error!("comm error: {:?}", Debug2Format(&err));
-        }
-    }
-}
-
-async fn comm_cycle<LINK: LinkLayer>(
-    app: &mut DummyAppLayer<LINK>,
-    consumer: &mut Consumer<'static, SensorValue, VALUES_QUEUE_SIZE>,
-) -> Result<(), DummyAppLayerError<LINK::Error>> {
-    info!("Initiating handshake...");
-
-    app.emit(&Packet::HandshakeStart(HandshakeStart {
-        major: PROTOCOL_VERSION_MAJOR,
-        minor: PROTOCOL_VERSION_MINOR,
-    }))
-    .await?;
-    app.flush().await?;
-    info!("Handshake initiated, waiting for handshake end...");
-
-    let gw_epoch = match app.read::<Packet>().await? {
-        Packet::HandshakeEnd(HandshakeEnd { major, minor, .. })
-            if major != PROTOCOL_VERSION_MAJOR || minor != PROTOCOL_VERSION_MINOR =>
-        {
-            return Err(DummyAppLayerError::IncompatibleProtocol(major, minor))
-        }
-        Packet::HandshakeEnd(HandshakeEnd { epoch, .. }) => Instant::from_millis(epoch),
-        pkt => return Err(DummyAppLayerError::UnexpectedPacket(pkt.id())),
-    };
-
-    info!("Gateway epoch millis: {}", gw_epoch.as_millis());
-    let s_epoch = Instant::now();
-    let diff = (s_epoch.as_micros() as i64).wrapping_sub(gw_epoch.as_micros() as i64);
-    info!(
-        "Sensor epoch millis: {} (diff = {}us)",
-        s_epoch.as_millis(),
-        diff
-    );
-
-    loop {
-        let mut values: heapless::Vec<SensorValue, VALUES_QUEUE_SIZE> = heapless::Vec::new();
-        while let Some(value) = consumer.dequeue() {
-            // SAFETY: the queue and the vec have the same max size (VALUES_QUEUE_SIZE)
-            unsafe { values.push_unchecked(value) }
-        }
-
-        if !values.is_empty() {
-            info!("Sending {} values...", values.len());
-            let time_offset: i64 = (s_epoch.elapsed().as_micros() as i64 - diff) / 1_000_000;
-
-            app.emit(&Packet::SensorData(SensorData {
-                count: values.len() as u8,
-            }))
-            .await?;
-
-            for value in values {
-                app.emit(SensorValuePoint { value, time_offset }).await?;
-            }
-            app.flush().await?;
-
-            info!("Waiting for ack...");
-            // Wait for Ack
-            match app.read::<Packet>().await? {
-                Packet::Ack => {}
-                pkt => return Err(DummyAppLayerError::UnexpectedPacket(pkt.id())),
-            }
-        }
-
-        embassy_time::Timer::after(embassy_time::Duration::from_secs(VALUES_SEND_INTERVAL)).await;
-    }
+    sensor_board::comm::app::run(lora, consumer).await;
 }
 
 #[panic_handler]

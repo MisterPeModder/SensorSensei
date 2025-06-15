@@ -1,6 +1,8 @@
 #![no_std]
 
 #[cfg(feature = "lora")]
+pub mod comm;
+#[cfg(feature = "lora")]
 pub mod lora;
 
 pub const PROTOCOL_VERSION_MAJOR: u8 = 1;

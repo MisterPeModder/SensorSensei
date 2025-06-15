@@ -3,7 +3,12 @@ name = "protocol"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["defmt"]
+defmt = ["dep:defmt"]
+
 [dependencies]
+defmt = { version = "1.0.1", optional = true }
 heapless = "0.8.0"
 hmac = { version = "0.12.1", default-features = false }
 sha2 = { version = "0.10.9", default-features = false }

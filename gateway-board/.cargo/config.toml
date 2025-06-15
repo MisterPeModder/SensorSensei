@@ -5,7 +5,7 @@ runner = "espflash flash --monitor --log-format defmt"
 runner = "espflash flash --monitor --log-format defmt"
 
 [env]
-DEFMT_LOG = "info,gateway_board::net::tcp=trace"
+DEFMT_LOG = "info,gateway_board::net::tcp=trace,gateway_board::lora=trace,protocol::link::v1=trace"
 
 [build]
 rustflags = ["-C", "link-arg=-nostartfiles", "-C", "link-arg=-Tdefmt.x"]
