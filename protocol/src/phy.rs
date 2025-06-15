@@ -4,28 +4,37 @@ use core::future::Future;
 pub trait PhysicalLayer {
     type Error: core::error::Error;
 
-    async fn send(&mut self, data: &[u8]) -> Result<usize, Self::Error>;
-    async fn recv(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error>;
+    /// Read the next full physical packet.
+    /// NOTE: The buffer may be reused for reading and writing.
+    async fn read(&mut self) -> Result<(), Self::Error>;
 
-    /// Sends the entire `data` buffer, ensuring that all bytes are sent.
-    async fn send_exact(&mut self, data: &[u8]) -> Result<(), Self::Error> {
-        let mut sent = 0usize;
-        while sent < data.len() {
-            let bytes_sent = self.send(&data[sent..]).await?;
-            sent += bytes_sent;
-        }
-        Ok(())
-    }
+    fn buffer(&self) -> &[u8];
+
+    /// Appends `data` to the buffer for sending.
+    /// NOTE: The buffer may be reused for reading and writing.
+    async fn write(&mut self, data: &[u8]) -> Result<(), Self::Error>;
+
+    /// Sends any buffered data to the physical layer.
+    /// NOTE: The buffer may be reused for reading and writing.
+    async fn flush(&mut self) -> Result<(), Self::Error>;
 }
 
 impl<PHY: PhysicalLayer> PhysicalLayer for &mut PHY {
     type Error = PHY::Error;
 
-    fn send(&mut self, data: &[u8]) -> impl Future<Output = Result<usize, Self::Error>> {
-        (*self).send(data)
+    fn read(&mut self) -> impl Future<Output = Result<(), Self::Error>> {
+        (*self).read()
     }
 
-    fn recv(&mut self, buf: &mut [u8]) -> impl Future<Output = Result<usize, Self::Error>> {
-        (*self).recv(buf)
+    fn buffer(&self) -> &[u8] {
+        (*self as &PHY).buffer()
+    }
+
+    fn write(&mut self, buf: &[u8]) -> impl Future<Output = Result<(), Self::Error>> {
+        (*self).write(buf)
+    }
+
+    fn flush(&mut self) -> impl Future<Output = Result<(), Self::Error>> {
+        (*self).flush()
     }
 }
