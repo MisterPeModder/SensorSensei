@@ -80,10 +80,10 @@ static ESP_WIFI_CTRL: StaticCell<esp_wifi::EspWifiController<'static>> = StaticC
 async fn run_lora(hardware: gateway_board::lora::LoraHardware, sender: ValueSender) {
     use gateway_board::lora::LoraController;
 
-    let mut lora = LoraController::new(hardware, sender)
+    let lora = LoraController::new(hardware)
         .await
         .expect("failed to initialize LoRa");
-    lora.run().await;
+    gateway_board::comm::app::run(lora, sender).await
 }
 
 #[esp_hal_embassy::main]

@@ -5,17 +5,15 @@ pub trait PhysicalLayer {
     type Error: core::error::Error;
 
     /// Read the next full physical packet.
-    /// NOTE: The buffer may be reused for reading and writing.
     async fn read(&mut self) -> Result<(), Self::Error>;
 
-    fn buffer(&self) -> &[u8];
+    /// Returns the buffer containing the received data.
+    fn rx_buffer(&self) -> &[u8];
 
     /// Appends `data` to the buffer for sending.
-    /// NOTE: The buffer may be reused for reading and writing.
     async fn write(&mut self, data: &[u8]) -> Result<(), Self::Error>;
 
     /// Sends any buffered data to the physical layer.
-    /// NOTE: The buffer may be reused for reading and writing.
     async fn flush(&mut self) -> Result<(), Self::Error>;
 }
 
@@ -26,8 +24,8 @@ impl<PHY: PhysicalLayer> PhysicalLayer for &mut PHY {
         (*self).read()
     }
 
-    fn buffer(&self) -> &[u8] {
-        (*self as &PHY).buffer()
+    fn rx_buffer(&self) -> &[u8] {
+        (*self as &PHY).rx_buffer()
     }
 
     fn write(&mut self, buf: &[u8]) -> impl Future<Output = Result<(), Self::Error>> {

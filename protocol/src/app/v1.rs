@@ -1,8 +1,5 @@
 use crate::codec::{AsyncDecode, AsyncDecoder, AsyncEncode, AsyncEncoder, ToLeb128Ext};
-use crate::link::v1::LinkLayer;
-use core::fmt::{Debug, Display, Formatter};
 use core::future::Future;
-use thiserror::Error;
 
 /// A version 1.0 packet. ([reference])
 ///
@@ -63,20 +60,6 @@ pub enum SensorValue {
     Altitude(f32) = 2,
     AirQuality(f32) = 3,
     Unknown { id: u32, value_len: u32 } = u32::MAX,
-}
-
-/// Kinda broken application layer implementation
-pub struct DummyAppLayer<LINK> {
-    link: LINK,
-    offset: usize,
-}
-
-#[derive(Debug, Error)]
-pub enum DummyAppLayerError<LINK: core::error::Error> {
-    Decoding,
-    UnexpectedPacket(u8),
-    IncompatibleProtocol(u8, u8),
-    Link(LINK),
 }
 
 impl Packet {
@@ -265,71 +248,6 @@ impl<D: AsyncDecoder + ?Sized> AsyncDecode<D> for SensorValue {
 
         decoder.read_discard(value_len).await?;
         Ok(value)
-    }
-}
-
-impl<LINK: LinkLayer> DummyAppLayer<LINK> {
-    pub fn new(link: LINK) -> Self {
-        Self { link, offset: 0 }
-    }
-
-    pub async fn flush(&mut self) -> Result<(), DummyAppLayerError<LINK::Error>> {
-        self.link
-            .flush(None)
-            .await
-            .map_err(DummyAppLayerError::Link)
-    }
-}
-
-impl<LINK: LinkLayer> AsyncEncoder for DummyAppLayer<LINK> {
-    type Error = DummyAppLayerError<LINK::Error>;
-
-    async fn emit_bytes(&mut self, mut buf: &[u8]) -> Result<(), Self::Error> {
-        while !buf.is_empty() {
-            let written = self.link.write(None, buf).await.unwrap();
-            buf = &buf[written..];
-        }
-        Ok(())
-    }
-}
-
-impl<LINK: LinkLayer> AsyncDecoder for DummyAppLayer<LINK> {
-    type Error = DummyAppLayerError<LINK::Error>;
-
-    async fn read_bytes(&mut self, buf: &mut [u8]) -> Result<(), Self::Error> {
-        let mut bytes_read = 0usize;
-
-        while bytes_read < buf.len() {
-            let (read, _from) = self
-                .link
-                .read(&mut buf[bytes_read..])
-                .await
-                .map_err(DummyAppLayerError::Link)?;
-            self.offset += read;
-            bytes_read += read;
-        }
-        Ok(())
-    }
-
-    fn current_offset(&self) -> usize {
-        self.offset
-    }
-
-    fn decoding_error(&self) -> Self::Error {
-        DummyAppLayerError::Decoding
-    }
-}
-
-impl<LINK: core::error::Error> Display for DummyAppLayerError<LINK> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        match &self {
-            DummyAppLayerError::Decoding => f.write_str("decoding error"),
-            DummyAppLayerError::Link(err) => write!(f, "{}", err),
-            DummyAppLayerError::UnexpectedPacket(id) => write!(f, "unexpected packet: {}", id),
-            DummyAppLayerError::IncompatibleProtocol(major, minor) => {
-                write!(f, "incompatible protocol: {}.{}", major, minor)
-            }
-        }
     }
 }
 

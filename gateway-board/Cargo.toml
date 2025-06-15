@@ -80,7 +80,7 @@ heapless = { version = "0.8.0", optional = true }
 lora-phy = { version = "3.0.1", optional = true }
 memchr = { version = "2.7.4", default-features = false }
 portable-atomic = "1.11.0"
-protocol = { path = "../protocol" }
+protocol = { path = "../protocol", features = ["defmt"] }
 thiserror = { version = "2.0.12", default-features = false }
 ssd1306 = { version = "0.10.0", optional = true, features = ["async"] }
 static_cell = "2.1.0"
