@@ -15,6 +15,7 @@ pub enum ConfigurationVariable {
     WifiApSsid,
     DnsServer1,
     DnsServer2,
+    HtmlFormAction,
 }
 
 impl TryFrom<&[u8]> for ConfigurationVariable {
@@ -28,6 +29,7 @@ impl TryFrom<&[u8]> for ConfigurationVariable {
             b"wifi_ap_ssid" => Ok(ConfigurationVariable::WifiApSsid),
             b"dns_server_1" => Ok(ConfigurationVariable::DnsServer1),
             b"dns_server_2" => Ok(ConfigurationVariable::DnsServer2),
+            b"action" => Ok(ConfigurationVariable::HtmlFormAction),
             _ => Err(()),
         }
     }
@@ -52,21 +54,47 @@ async fn return_dashboard_form<'a, 'r>(
 
     let mut ip_str: heapless::String<15> = heapless::String::new();
     write!(&mut ip_str, "{}", config.dns_server_1).ok();
-    res.write_all_vectored(&[br#"HTTP/1.0 200 OK\r\n\r\n<!DOCTYPE html><html lang="en"><head> <title>Gateway Board Configuration</title> <style> body { font-family: Arial, Helvetica, sans-serif; } #gw-config { display: flex; flex-direction: column; gap: 0.5em; max-width: 400px; } #gw-config label { font-weight: bold; } </style></head><body> <h1>Gateway Board Configuration</h1> <form method="post" id="gw-config"> <input type="hidden" name="csrf_token" value=""#,
-        config.csrf_token.as_bytes(),
-        br#""> <label for="wifi_sta_ssid">WiFi external access point SSID</label> <input type="text" name="wifi_sta_ssid" placeholder="WiFi SSID" value=""#,
-        config.wifi_sta_ssid.as_deref().unwrap_or("").as_bytes(),
-        br#"" required> <label for="wifi_sta_password">WiFi external access point password</label> <input type="password" name="wifi_sta_password" placeholder="WiFi Password" value="(_unchanged_)"#,
-        config.wifi_sta_pass.as_deref().unwrap_or("").as_bytes(),
-        br#"" required> <label for="wifi_sta_ssid">WiFi internal access point SSID</label> <input type="text" name="wifi_ap_ssid" placeholder="WiFi AP SSID" value="" required> <label for="dns_server_1">Primary DNS server</label> <input type="text" name="dns_server_1" placeholder="1.1.1.1" value=""#,
-        ip_str.as_bytes(),
-        br#"" required> <label for="dns_server_2">Secondary DNS server</label> <input type="text" name="dns_server_2" placeholder="1.0.0.1" value=""#,
+    #[rustfmt::skip]
+    res.write_all_vectored(&[concat!("HTTP/1.0 200 OK\r\nConnection: close\r\n\r\n",
+r#"<!DOCTYPE html><html lang="en"><head>
+<title>Gateway Board Configuration</title>
+<style>
+body {
+font-family: Arial, Helvetica, sans-serif;
+}
+#gw-config {
+display: flex; flex-direction: column; gap: 0.5em; max-width: 400px;
+}
+#gw-config label {
+font-weight: bold;
+}
+</style>
+</head>
+<body>
+<h1>Gateway Board Configuration</h1>
+<form method="post" id="gw-config">
+<input type="hidden" name="csrf_token" value=""#).as_bytes(), config.csrf_token.as_bytes(), br#"">
+<label for="wifi_sta_ssid">WiFi external access point SSID</label>
+<input type="text" name="wifi_sta_ssid" placeholder="WiFi SSID" value=""#, config.wifi_sta_ssid.as_deref().unwrap_or("").as_bytes(), br#"" required>
+<label for="wifi_sta_password">WiFi external access point password</label>
+<input type="password" name="wifi_sta_password" placeholder="WiFi Password" value="(_unchanged_)" required>
+<label for="wifi_sta_ssid">WiFi internal access point SSID</label>
+<input type="text" name="wifi_ap_ssid" placeholder="WiFi AP SSID" value=""#, config.wifi_ap_ssid.as_bytes(), br#"" required>
+<label for="dns_server_1">Primary DNS server</label>
+<input type="text" name="dns_server_1" placeholder="1.1.1.1" value=""#, ip_str.as_bytes(), br#"" required>"#,
     ]).await?;
+
     ip_str.clear();
     write!(&mut ip_str, "{}", config.dns_server_2).ok();
-    res.write_all_vectored(&[ip_str.as_bytes(),
-        br#"" required> <button type="submit" name="action" value="apply">Apply</button> </form></body>"#]
-    ).await?;
+
+    #[rustfmt::skip]
+    res.write_all_vectored(&[
+br#"<label for="dns_server_2">Secondary DNS server</label>
+<input type="text" name="dns_server_2" placeholder="1.0.0.1" value=""#, ip_str.as_bytes(), br#"" required>
+<button type="submit" name="action" value="apply">Apply</button>
+</form>
+</body>"#,
+    ]).await?;
     Ok(res)
 }
 
@@ -82,12 +110,12 @@ async fn handle_dashboard_post<'a, 'r>(
 
         for (key, value) in util::encoding::decode_form_url_encoded(request.body()) {
             let Ok(config_var) = ConfigurationVariable::try_from(key) else {
-                warn!("Invalid configuration variable name: {:?}", key);
+                warn!("Invalid configuration variable name: {=[u8]:a}", key);
                 continue;
             };
 
             let Ok(value_str) = core::str::from_utf8(value) else {
-                warn!("Invalid UTF-8 in value for {:?}", key);
+                warn!("Invalid UTF-8 in value for {=[u8]:a}", key);
                 continue;
             };
 
@@ -156,6 +184,9 @@ async fn handle_dashboard_post<'a, 'r>(
                     }
                     Err(_) => warn!("Invalid DNS server 2 address."),
                 },
+                ConfigurationVariable::HtmlFormAction => {
+                    // browser typically sends this as the last field, ignore it (e.g. "action=apply")
+                }
             }
         }
     }
