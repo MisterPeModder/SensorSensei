@@ -91,10 +91,10 @@ async fn main(spawner: Spawner) {
     let peripherals = esp_hal::init(config);
     let rng_context: Rng = Rng::new(peripherals.RNG);
 
-    // Initialize config struct
-    CONFIG.lock().await.load_from_env(rng_context);
-
     esp_alloc::heap_allocator!(size: 72 * 1024);
+
+    // Initialize config struct
+    gateway_board::config::Config::global_init(rng_context).await;
 
     // wokwi: needed so that the console output is formatted correctly
     esp_println::print!("\x1b[20h");
