@@ -35,6 +35,23 @@ impl TryFrom<&[u8]> for ConfigurationVariable {
     }
 }
 
+enum HtmlFormAction {
+    Apply,
+    SaveAndReboot,
+}
+
+impl TryFrom<&[u8]> for HtmlFormAction {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        match value {
+            b"apply" => Ok(Self::Apply),
+            b"save-reboot" => Ok(Self::SaveAndReboot),
+            _ => Err(()),
+        }
+    }
+}
+
 pub async fn dispatch_http_request<'a, 'r>(
     request: HttpServerRequest<'a, 'r>,
 ) -> Result<HttpServerResponse<'a, 'r>, HttpServerError> {
@@ -56,8 +73,11 @@ async fn return_dashboard_form<'a, 'r>(
     write!(&mut ip_str, "{}", config.dns_server_1).ok();
     #[rustfmt::skip]
     res.write_all_vectored(&[concat!("HTTP/1.0 200 OK\r\nConnection: close\r\n\r\n",
-r#"<!DOCTYPE html><html lang="en"><head>
+r#"<!DOCTYPE html>
+<html lang="en">
+<head>
 <title>Gateway Board Configuration</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 body {
 font-family: Arial, Helvetica, sans-serif;
@@ -92,9 +112,55 @@ font-weight: bold;
 br#"<label for="dns_server_2">Secondary DNS server</label>
 <input type="text" name="dns_server_2" placeholder="1.0.0.1" value=""#, ip_str.as_bytes(), br#"" required>
 <button type="submit" name="action" value="apply">Apply</button>
+<button type="submit" name="action" value="save-reboot">Save & Reboot</button>
 </form>
 </body>"#,
     ]).await?;
+    Ok(res)
+}
+
+async fn return_processing_form_page<'a, 'r>(
+    request: HttpServerRequest<'a, 'r>,
+) -> Result<HttpServerResponse<'a, 'r>, HttpServerError> {
+    info!("HTTP POST request, returning processing page");
+    let mut res = request.new_response();
+    res.status = 202;
+
+    #[rustfmt::skip]
+    res.write_all(concat!("HTTP/1.0 202 Accepted\r\nRefresh: 2, /\r\nConnection: close\r\n\r\n",
+r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Processing request...</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body>
+<h1>Processing request...</h1>
+<p>Please wait a few seconds.</p>
+</body>"#
+    ).as_bytes()) .await?;
+    Ok(res)
+}
+
+async fn return_reboot_page<'a, 'r>(
+    request: HttpServerRequest<'a, 'r>,
+) -> Result<HttpServerResponse<'a, 'r>, HttpServerError> {
+    let mut res = request.new_response();
+    res.status = 200;
+
+    #[rustfmt::skip]
+    res.write_all(concat!("HTTP/1.0 202 Accepted\r\nRefresh: 10, /\r\nConnection: close\r\n\r\n",
+r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Gateway rebooting...</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body>
+<h1>Gateway Board is rebooting...</h1>
+<p>Please wait a few seconds for the system to come back online.</p>
+</body>"#
+    ).as_bytes()).await?;
     Ok(res)
 }
 
@@ -103,6 +169,7 @@ async fn handle_dashboard_post<'a, 'r>(
 ) -> Result<HttpServerResponse<'a, 'r>, HttpServerError> {
     info!("HTTP POST request, processing form submission");
     let mut valid_csrf_token: bool = false;
+    let mut action = HtmlFormAction::Apply; // Default action
 
     // Scope the config lock to this block to ensure it is released before returning
     {
@@ -184,21 +251,38 @@ async fn handle_dashboard_post<'a, 'r>(
                     }
                     Err(_) => warn!("Invalid DNS server 2 address."),
                 },
-                ConfigurationVariable::HtmlFormAction => {
-                    // browser typically sends this as the last field, ignore it (e.g. "action=apply")
-                }
+                ConfigurationVariable::HtmlFormAction => match HtmlFormAction::try_from(value) {
+                    // browser typically sends this as the last field
+                    Ok(a) => action = a,
+                    Err(_) => warn!("Invalid HTML form action: {=[u8]:a}", value),
+                },
             }
         }
     }
 
-    if valid_csrf_token {
-        info!("Form submission processed successfully");
-        // Return the updated dashboard form
-        return_dashboard_form(request).await
-    } else {
+    if !valid_csrf_token {
         let mut res = request.new_response();
         warn!("CSRF token is missing or invalid in form submission");
         res.return_bad_request().await?;
-        Ok(res)
+        return Ok(res);
+    }
+
+    match action {
+        HtmlFormAction::Apply => {
+            info!("Form submission processed successfully");
+            // Return a response indicating the form was processed
+            return_processing_form_page(request).await
+        }
+        HtmlFormAction::SaveAndReboot => {
+            info!("Form submitted with 'Save and Reboot' action, rebooting now");
+            // Return a response indicating the system is rebooting
+            let mut res = return_reboot_page(request).await?;
+
+            // force closing the connection
+            res.finish_connection().await;
+
+            // then reboot the system
+            esp_hal::system::software_reset()
+        }
     }
 }

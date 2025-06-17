@@ -354,4 +354,18 @@ impl<'a, 'r> HttpServerResponse<'a, 'r> {
             .await
             .map_err(|_| HttpServerError::SocketError)
     }
+
+    pub async fn return_see_other(&mut self, location: &str) -> Result<(), HttpServerError> {
+        self.status = 303;
+        self.write_all_vectored(&[
+            b"HTTP/1.0 303 See Other\r\nLocation: ",
+            location.as_bytes(),
+            b"\r\nConnection: close\r\n\r\n",
+        ])
+        .await
+    }
+
+    pub async fn finish_connection(&mut self) {
+        HttpServer::finish_connection(&mut self.sock).await
+    }
 }
