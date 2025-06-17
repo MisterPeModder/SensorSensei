@@ -1,8 +1,11 @@
 use core::fmt::Write;
+use core::mem::MaybeUninit;
 use core::{net::Ipv4Addr, str::FromStr};
-use defmt::{info, warn};
+use defmt::{error, info, warn, Debug2Format};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
+use embedded_storage::nor_flash::{NorFlash, ReadNorFlash};
 use esp_hal::rng::Rng;
+use esp_storage::FlashStorage;
 
 pub struct EnvVariables {
     pub wifi_sta_ssid: Option<&'static str>,
@@ -141,6 +144,82 @@ impl Config {
         info!("Configuration loaded successfully.");
         self
     }
+
+    pub fn load_from_flash() {
+        let mut storage = FlashStorage::new();
+        let mut sector: ConfigSector = ConfigSector::new_uninit();
+
+        // unsafe {
+        //     // Intentionally write a default header to the sector
+        //     sector
+        //         .raw
+        //         .as_mut_ptr()
+        //         .cast::<ConfigSectorHeader>()
+        //         .write(ConfigSectorHeader {
+        //             version: 0,
+        //             kv_count: 0,
+        //             checksum: [0; 16],
+        //         });
+        // }
+
+        let res = unsafe {
+            // SAFETY: storage only *writes* to the buffer, no need to worry about uninitialized memory
+            storage.read(0, sector.raw.assume_init_mut())
+        };
+
+        if let Err(err) = res {
+            error!("FLASH READ FAILED: {}", Debug2Format(&err));
+            return;
+        }
+
+        // SAFETY: all bit patterns of the header are valid
+        let header: &ConfigSectorHeader =
+            unsafe { &*sector.raw.as_ptr().cast::<ConfigSectorHeader>() };
+
+        // Cursor
+
+        info!(
+            "IT WORKED! FLASH READ OK, version: {}, kv_count: {}",
+            header.version, header.kv_count
+        );
+    }
+
+    pub fn save_to_flash(&self) {
+        let mut storage = FlashStorage::new();
+        let mut sector: ConfigSector = ConfigSector::new_uninit();
+
+        unsafe {
+            sector
+                .raw
+                .as_mut_ptr()
+                .cast::<ConfigSectorHeader>()
+                .write(ConfigSectorHeader {
+                    version: 1,
+                    kv_count: 1,
+                    checksum: [0; 16],
+                });
+        }
+
+        let data = sector.data_mut();
+
+        data[0] = MaybeUninit::new(3);
+        data[1] = MaybeUninit::new(b'k');
+        data[2] = MaybeUninit::new(b'e');
+        data[3] = MaybeUninit::new(b'y');
+
+        data[4] = MaybeUninit::new(3);
+        data[5] = MaybeUninit::new(b'H');
+        data[6] = MaybeUninit::new(b'i');
+        data[7] = MaybeUninit::new(b'!');
+
+        let res = unsafe { storage.write(0, sector.raw.assume_init_mut()) };
+
+        if let Err(err) = res {
+            error!("FLASH WRITE FAILED: {}", Debug2Format(&err));
+        } else {
+            info!("Configuration saved to flash successfully.");
+        }
+    }
 }
 
 impl Default for Config {
@@ -164,3 +243,36 @@ pub const ENVIRONMENT_VARIABLES: EnvVariables = EnvVariables {
 };
 
 pub static CONFIG: Mutex<CriticalSectionRawMutex, Config> = Mutex::new(Config::new());
+
+#[repr(C, align(4))]
+struct ConfigSector {
+    raw: MaybeUninit<[u8; FlashStorage::SECTOR_SIZE as usize]>,
+}
+
+impl ConfigSector {
+    pub fn new_uninit() -> Self {
+        ConfigSector {
+            raw: MaybeUninit::uninit(),
+        }
+    }
+
+    /// Returns a mutable but uninitialized slice of the sector's raw data after the header.
+    pub fn data_mut(&mut self) -> &mut [MaybeUninit<u8>] {
+        unsafe {
+            core::slice::from_raw_parts_mut(
+                self.raw
+                    .as_mut_ptr()
+                    .cast::<MaybeUninit<u8>>()
+                    .add(core::mem::size_of::<ConfigSectorHeader>()),
+                core::mem::size_of::<ConfigSector>() - core::mem::size_of::<ConfigSectorHeader>(),
+            )
+        }
+    }
+}
+
+#[repr(C, align(4))]
+struct ConfigSectorHeader {
+    version: u8,
+    kv_count: u8,
+    checksum: [u8; 16],
+}

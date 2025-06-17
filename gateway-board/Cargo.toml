@@ -15,6 +15,7 @@ board-esp32dev = [
   "esp-hal-embassy/esp32",
   "esp-println/esp32",
   "esp-wifi/esp32",
+  "esp-storage/esp32",
 ]
 board-heltec-lora32v3 = [
   "esp-backtrace/esp32s3",
@@ -22,6 +23,7 @@ board-heltec-lora32v3 = [
   "esp-hal-embassy/esp32s3",
   "esp-println/esp32s3",
   "esp-wifi/esp32s3",
+  "esp-storage/esp32s3",
 ]
 display-ssd1306 = ["display-interface", "ssd1306"]
 lora = ["lora-phy"]
@@ -57,6 +59,7 @@ embassy-sync = "0.6.2"
 embassy-time = { version = "0.4.0", features = ["defmt"] }
 embedded-hal-async = "1.0.0"
 embedded-io-async = "0.6.1"
+embedded-storage = "0.3.1"
 enumset = "1.1.5"
 esp-hal = { git = "https://github.com/esp-rs/esp-hal.git", tag = "esp-hal-v1.0.0-beta.0", features = [
   "unstable"
@@ -76,6 +79,7 @@ esp-backtrace = { git = "https://github.com/esp-rs/esp-hal.git", tag = "esp-hal-
   "panic-handler",
   "println",
 ], package = "esp-backtrace" }
+esp-storage = { git = "https://github.com/esp-rs/esp-hal.git", tag = "esp-hal-v1.0.0-beta.0", features = [ "nor-flash" ] }
 heapless = { version = "0.8.0", optional = true }
 lora-phy = { version = "3.0.1", optional = true }
 memchr = { version = "2.7.4", default-features = false }
