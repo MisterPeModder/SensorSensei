@@ -258,6 +258,8 @@ async fn handle_dashboard_post<'a, 'r>(
                 },
             }
         }
+
+        config.save_to_flash();
     }
 
     if !valid_csrf_token {
