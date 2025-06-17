@@ -1,11 +1,11 @@
 use super::{HttpMethod, SOCKET_TIMEOUT};
 use crate::net::tcp::BoxedTcpSocket;
 use core::net::Ipv4Addr;
-use defmt::{error, info, Format};
+use defmt::{debug, error, info, Format};
 use embassy_futures::select::Either;
 use embassy_net::{tcp::TcpSocket, IpListenEndpoint, Stack};
 use embassy_time::{Duration, Timer};
-use embedded_io_async::{Read, Write};
+use embedded_io_async::Write;
 
 /// Dummy dual-stack HTTP server.
 ///
@@ -128,6 +128,7 @@ impl<'a> HttpServer<'a> {
             HttpServerRequest<'a, 'r>,
         ) -> Result<HttpServerResponse<'a, 'r>, HttpServerError>,
     {
+        debug!("http-server: handling client request");
         buffer.clear();
         let method_end = Self::read_until_byte(sock, buffer, b' ').await?;
         let Ok(method) = HttpMethod::try_from(&buffer[..method_end]) else {
@@ -136,30 +137,70 @@ impl<'a> HttpServer<'a> {
             return Ok(res);
         };
         Self::shift_buffer(buffer, method_end + 1);
+        debug!("http-server: method: {}", AsRef::<str>::as_ref(&method));
 
         // Read the Content-Length header, expecting 'Content-Length: ' (other formats are not supported).
-        let content_length_start =
-            Self::read_until_bytes(sock, buffer, b"Content-Length: ").await?;
-        Self::shift_buffer(buffer, content_length_start + 16); // 16 is the length of "Content-Length: "
-        let content_length_end = Self::read_until_byte(sock, buffer, b'\r').await?;
+        // OR read until the end of the headers.
+        let (content_length, headers_end) = match Self::read_until_bytes(
+            sock,
+            buffer,
+            &[b"Content-Length: ", b"\r\n\r\n"],
+        )
+        .await?
+        {
+            // "Content-Length: " encountered first, read the content length
+            ReadUntilBytesMatch {
+                pattern: 0,
+                start: content_length_start,
+            } => {
+                Self::shift_buffer(buffer, content_length_start + 16); // 16 is the length of "Content-Length: "
+                let content_length_end = Self::read_until_byte(sock, buffer, b'\r').await?;
 
-        let Some(content_length) = core::str::from_utf8(&buffer[..content_length_end])
-            .ok()
-            .and_then(|s| s.parse::<usize>().ok())
-        else {
-            let mut res = HttpServerResponse::new(sock);
-            res.return_bad_request().await?;
-            return Ok(res);
+                let Some(content_length) = core::str::from_utf8(&buffer[..content_length_end])
+                    .ok()
+                    .and_then(|s| s.parse::<usize>().ok())
+                else {
+                    info!("http-server: invalid Content-Length header");
+                    let mut res = HttpServerResponse::new(sock);
+                    res.return_bad_request().await?;
+                    return Ok(res);
+                };
+                debug!("http-server: content length: {}", content_length);
+
+                // then discard other headers
+                let headers_end = Self::read_until_bytes(sock, buffer, &[b"\r\n\r\n"])
+                    .await?
+                    .start;
+
+                (content_length, headers_end)
+            }
+            // "\r\n\r\n" encountered first, no Content-Length header, thus no body
+            ReadUntilBytesMatch {
+                pattern: _,
+                start: headers_end,
+            } => (0, headers_end),
         };
-
-        // discard other headers
-        let headers_end = Self::read_until_bytes(sock, buffer, b"\r\n\r\n").await?;
 
         if content_length > 0 {
             Self::shift_buffer(buffer, headers_end + 4); // 4 is the length of "\r\n\r\n"
-            sock.read_exact(&mut buffer[..content_length])
-                .await
-                .map_err(|_| HttpServerError::SocketError)?;
+
+            // the number of bytes of the body that are not yet in the buffer
+            let mut remaining = content_length.saturating_sub(buffer.len());
+
+            while remaining > 0 {
+                info!(
+                    "http-server: reading remaining body ({=usize}/{=usize})",
+                    buffer.len(),
+                    content_length
+                );
+                Self::read_append(sock, buffer).await?;
+                remaining = content_length.saturating_sub(buffer.len());
+            }
+            info!(
+                "http-server: body fully read ({=usize}/{=usize})",
+                buffer.len(),
+                content_length
+            );
         }
 
         let req = HttpServerRequest {
@@ -222,17 +263,22 @@ impl<'a> HttpServer<'a> {
         }
     }
 
-    /// Reads the socket until a specific byte sequence is encountered, or there is a networking error, or the buffer is completely full.
-    /// Returns the position of the beginning of the sequence from the start of the buffer.
+    /// Reads the socket until one of the byte sequences are encountered, or there is a networking error, or the buffer is completely full.
+    /// Returns a match with the position of the first pattern found and its index in the `patterns` slice.
     async fn read_until_bytes<const N: usize>(
         sock: &mut TcpSocket<'_>,
         buf: &mut heapless::Vec<u8, N>,
-        bytes: &[u8],
-    ) -> Result<usize, HttpServerError> {
+        patterns: &[&[u8]],
+    ) -> Result<ReadUntilBytesMatch, HttpServerError> {
         let mut offset = 0usize;
         loop {
-            if let Some(pos) = memchr::memmem::find(&buf[offset..], bytes) {
-                break Ok(offset + pos);
+            for (i, pattern) in patterns.iter().enumerate() {
+                if let Some(pos) = memchr::memmem::find(&buf[offset..], pattern) {
+                    return Ok(ReadUntilBytesMatch {
+                        start: offset + pos,
+                        pattern: i,
+                    });
+                }
             }
             offset = buf.len();
             Self::read_append(sock, buf).await?;
@@ -244,6 +290,11 @@ impl<'a> HttpServer<'a> {
         buf.copy_within(count.., 0);
         buf.truncate(buf.len() - count);
     }
+}
+
+struct ReadUntilBytesMatch {
+    start: usize,
+    pattern: usize,
 }
 
 impl From<embassy_net::tcp::Error> for HttpServerError {
@@ -291,7 +342,7 @@ impl<'a, 'r> HttpServerResponse<'a, 'r> {
     pub async fn return_bad_request(&mut self) -> Result<(), HttpServerError> {
         self.status = 400;
         self.sock
-            .write_all(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+            .write_all(b"HTTP/1.0 400 Bad Request\r\nConnection: close\r\n\r\n")
             .await
             .map_err(|_| HttpServerError::SocketError)
     }
@@ -299,7 +350,7 @@ impl<'a, 'r> HttpServerResponse<'a, 'r> {
     pub async fn return_not_found(&mut self) -> Result<(), HttpServerError> {
         self.status = 404;
         self.sock
-            .write_all(b"HTTP/1.0 400 Not Found\r\n\r\n")
+            .write_all(b"HTTP/1.0 400 Not Found\r\nConnection: close\r\n\r\n")
             .await
             .map_err(|_| HttpServerError::SocketError)
     }
