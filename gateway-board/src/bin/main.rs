@@ -17,7 +17,7 @@ use static_cell::StaticCell;
 #[embassy_executor::task]
 #[cfg(feature = "display-ssd1306")]
 async fn display_things(hardware: gateway_board::display::GatewayDisplayHardware) -> ! {
-    gateway_board::display::display_demo(hardware).await
+    gateway_board::display::run_display(hardware).await
 }
 
 #[cfg(feature = "wifi")]

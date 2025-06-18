@@ -53,7 +53,7 @@ impl GatewayDisplay {
         rst.set_high();
 
         // The I2C bus used by the screen is exclusive to it.
-        // No need to use mutexes or other synchonization
+        // No need to use mutexes or other synchronization
         let i2c: I2c<'static, Async> = I2c::new(
             hardware.i2c,
             esp_hal::i2c::master::Config::default().with_frequency(Rate::from_hz(500000)),
@@ -124,32 +124,125 @@ impl From<TerminalModeError> for GatewayDisplayError {
     }
 }
 
-pub async fn display_demo(hardware: GatewayDisplayHardware) -> ! {
+pub async fn run_display(hardware: GatewayDisplayHardware) -> ! {
     let mut display = GatewayDisplay::new(hardware)
         .await
         .expect("failed to initialize display");
 
-    async fn do_display(display: &mut GatewayDisplay) -> Result<(), GatewayDisplayError> {
-        display.set_display_on(true)?;
-
-        display.clear()?;
-        display.set_brightness(Brightness::BRIGHTEST)?;
-        display.set_mirror(false)?;
-
-        writeln!(display, "Hello, World!")?;
-
-        let mut ticker = Ticker::every(Duration::from_millis(100));
-        let mut counter = 0u32;
-
-        loop {
-            display.set_position(0, 2)?;
-            write!(display, "{}.{}", counter / 10, counter % 10)?;
-            counter += 1;
-            ticker.next().await;
-        }
-    }
-
     do_display(&mut display).await.expect("do_display failure");
 
     unreachable!()
+}
+
+async fn do_display(display: &mut GatewayDisplay) -> Result<(), GatewayDisplayError> {
+    display.set_display_on(true)?;
+
+    display.clear()?;
+    display.set_brightness(Brightness::NORMAL)?;
+    display.set_mirror(false)?;
+
+    #[cfg(any(feature = "wifi", feature = "lora"))]
+    {
+        let mut ticker = Ticker::every(Duration::from_millis(2000));
+
+        display.set_position(0, 0)?;
+        write!(display, "-== Gateway  ==-")?;
+
+        loop {
+            #[cfg(feature = "wifi")]
+            {
+                draw_wifi_page(display).await?;
+                ticker.next().await;
+                draw_http_page(display).await?;
+                ticker.next().await;
+            }
+
+            #[cfg(feature = "lora")]
+            {
+                draw_lora_page(display).await?;
+                ticker.next().await;
+            }
+        }
+    }
+
+    #[cfg(not(any(feature = "wifi", feature = "lora")))]
+    loop {
+        Timer::after(Duration::from_secs(60)).await;
+    }
+}
+
+#[cfg(feature = "wifi")]
+async fn draw_http_page(display: &mut GatewayDisplay) -> Result<(), GatewayDisplayError> {
+    use core::net::Ipv4Addr;
+
+    display.set_position(0, 2)?;
+    write!(display, "* HTTP ")?;
+
+    // try to read HTTP server status without blocking
+    let address: Option<(Ipv4Addr, u16)> = {
+        crate::net::http::CURRENT_STATUS
+            .try_lock()
+            .ok()
+            .and_then(|status| status.address)
+        // force lock guard to drop after this
+    };
+
+    display.set_position(0, 3)?;
+    match address {
+        Some((address, port)) => write!(display, "{address:<16}\nport: {port:<10}")?,
+        None => write!(display, "(no address yet)\n                ")?,
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "wifi")]
+async fn draw_wifi_page(display: &mut GatewayDisplay) -> Result<(), GatewayDisplayError> {
+    use crate::net::wifi::StackStatus;
+
+    display.set_position(0, 2)?;
+    write!(display, "* Wi-Fi")?;
+
+    let (ap_status, sta_status) = {
+        crate::net::wifi::CURRENT_STATUS
+            .try_lock()
+            .map(|status| (status.ap_status, status.sta_status))
+            .unwrap_or((StackStatus::Initializing, StackStatus::Initializing))
+        // force lock guard to drop after this
+    };
+
+    display.set_position(0, 3)?;
+    write!(
+        display,
+        "AP: {:<12}\nSTA: {:<11}",
+        ap_status.as_ref(),
+        sta_status.as_ref()
+    )?;
+
+    Ok(())
+}
+
+#[cfg(feature = "lora")]
+async fn draw_lora_page(display: &mut GatewayDisplay) -> Result<(), GatewayDisplayError> {
+    use crate::comm::app::AppLayerPhase;
+
+    display.set_position(0, 2)?;
+    write!(display, "* LoRa")?;
+
+    let phase = {
+        crate::comm::app::CURRENT_STATUS
+            .try_lock()
+            .map(|status| status.phase)
+            .unwrap_or(AppLayerPhase::Initial)
+        // force lock guard to drop after this
+    };
+
+    display.set_position(0, 3)?;
+    match phase {
+        AppLayerPhase::Initial => write!(display, "waiting...      \n                ")?,
+        AppLayerPhase::Handshake => write!(display, "handshaking...  \n                ")?,
+        AppLayerPhase::Uplink => write!(display, "connected       \n                ")?,
+    }
+
+    Ok(())
 }

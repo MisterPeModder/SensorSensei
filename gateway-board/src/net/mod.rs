@@ -5,7 +5,7 @@ use core::net::Ipv4Addr;
 mod dhcp;
 pub mod http;
 mod tcp;
-mod wifi;
+pub mod wifi;
 
 pub use dhcp::GatewayDhcpServer;
 pub use wifi::{init_wifi, WifiController, WifiStackRunners};

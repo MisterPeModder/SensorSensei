@@ -1,7 +1,9 @@
+use core::ops::DerefMut;
+
 use defmt::{error, info, warn, Debug2Format};
 use embassy_net::{DhcpConfig, Runner, Stack, StackResources, StaticConfigV4};
 use embassy_sync::{
-    blocking_mutex::raw::NoopRawMutex,
+    blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex},
     mutex::{Mutex, MutexGuard},
 };
 use embassy_time::{Duration, Timer};
@@ -29,6 +31,34 @@ static STACK_RESOURCES_STA: StaticCell<StackResources<MAX_SOCKETS_STA>> = Static
 
 #[derive(Debug)]
 pub struct WifiConfigurationError;
+
+pub struct DisplayStatus {
+    pub ap_status: StackStatus,
+    pub sta_status: StackStatus,
+}
+
+pub static CURRENT_STATUS: Mutex<CriticalSectionRawMutex, DisplayStatus> =
+    Mutex::new(DisplayStatus {
+        ap_status: StackStatus::Initializing,
+        sta_status: StackStatus::Initializing,
+    });
+
+#[derive(Copy, Clone)]
+pub enum StackStatus {
+    Initializing,
+    Connecting,
+    Ready,
+}
+
+impl AsRef<str> for StackStatus {
+    fn as_ref(&self) -> &str {
+        match self {
+            StackStatus::Initializing => "init",
+            StackStatus::Connecting => "connecting",
+            StackStatus::Ready => "ready",
+        }
+    }
+}
 
 pub async fn init_wifi<'d>(
     esp_wifi_ctrl: &'d mut EspWifiController<'_>,
@@ -160,6 +190,8 @@ impl<'d> WifiController<'d> {
 
         while !matches!(esp_wifi::wifi::ap_state(), WifiState::ApStarted) {
             info!("wifi AP: starting access point...");
+
+            update_status(|s| s.ap_status = StackStatus::Initializing).await;
             if let Err(e) = ctrl.lock().await.start_async().await {
                 error!("wifi AP: start failed, attempting after {}: {:?}", DELAY, e);
                 Timer::after(DELAY).await;
@@ -168,6 +200,7 @@ impl<'d> WifiController<'d> {
                     "wifi AP: access point started, ssid=`{}`, auth_method=`{:?}`",
                     config.ssid, config.auth_method
                 );
+                update_status(|s| s.ap_status = StackStatus::Ready).await;
             }
         }
     }
@@ -191,6 +224,7 @@ impl<'d> WifiController<'d> {
                             "wifi STA: connecting to `{}` using auth `{:?}`",
                             config.ssid, config.auth_method
                         );
+                        update_status(|s| s.sta_status = StackStatus::Connecting).await;
                         if let Err(e) = ctrl.lock().await.connect_async().await {
                             error!(
                                 "wifi STA: connect failed, attempting after {}: {:?}",
@@ -199,6 +233,7 @@ impl<'d> WifiController<'d> {
                             Timer::after(DELAY).await;
                         } else {
                             info!("wifi STA: connected to access point");
+                            update_status(|s| s.sta_status = StackStatus::Ready).await;
                             return;
                         }
                     }
@@ -206,6 +241,7 @@ impl<'d> WifiController<'d> {
                 _ => {
                     // station mode isn't started yet
                     info!("wifi STA: starting controller...");
+                    update_status(|s| s.sta_status = StackStatus::Initializing).await;
                     if let Err(e) = ctrl.lock().await.start_async().await {
                         error!(
                             "wifi STA: start failed, attempting after {}: {:?}",
@@ -252,4 +288,8 @@ impl<'d> WifiController<'d> {
             (Some(ap), Some(sta)) => WifiConfiguration::Mixed(sta, ap),
         }
     }
+}
+
+async fn update_status<F: FnOnce(&mut DisplayStatus)>(f: F) {
+    f(CURRENT_STATUS.lock().await.deref_mut())
 }

@@ -10,6 +10,9 @@ use protocol::{
 };
 use thiserror::Error;
 
+#[cfg(feature = "display-ssd1306")]
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
+
 use crate::{
     comm::link::GatewayLinkLayer, ValueSender, PROTOCOL_VERSION_MAJOR, PROTOCOL_VERSION_MINOR,
 };
@@ -29,19 +32,36 @@ pub enum GatewayAppLayerError<LINK: core::error::Error> {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum AppLayerPhase {
+pub enum AppLayerPhase {
+    Initial,
     Handshake,
     Uplink,
 }
+
+#[cfg(feature = "display-ssd1306")]
+pub struct DisplayStatus {
+    pub phase: AppLayerPhase,
+}
+
+#[cfg(feature = "display-ssd1306")]
+pub static CURRENT_STATUS: Mutex<CriticalSectionRawMutex, DisplayStatus> =
+    Mutex::new(DisplayStatus {
+        phase: AppLayerPhase::Initial,
+    });
 
 /// Listens for LoRa packets in an infinite loop.
 pub async fn run<PHY: PhysicalLayer>(phy: PHY, mut value_sender: ValueSender) -> ! {
     // let mut value_sender = self.value_sender.take().expect("broken: no sender");
     let link = GatewayLinkLayer::new(phy);
-    let mut phase = AppLayerPhase::Handshake;
+    let mut phase = AppLayerPhase::Initial;
     let mut app = GatewayAppLayer::new(link);
 
     loop {
+        #[cfg(feature = "display-ssd1306")]
+        {
+            // update the display status
+            CURRENT_STATUS.lock().await.phase = phase;
+        }
         if let Err(err) = comm_cycle(&mut app, &mut phase, &mut value_sender).await {
             error!("comm error: {:?}", Debug2Format(&err));
         }

@@ -7,6 +7,9 @@ use embassy_net::{tcp::TcpSocket, IpListenEndpoint, Stack};
 use embassy_time::{Duration, Timer};
 use embedded_io_async::Write;
 
+#[cfg(feature = "display-ssd1306")]
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
+
 /// Dummy dual-stack HTTP server.
 ///
 /// Endpoints:
@@ -36,6 +39,15 @@ pub enum HttpServerError {
     SocketEof,
     FullBuffer,
 }
+
+#[cfg(feature = "display-ssd1306")]
+pub struct DisplayStatus {
+    pub address: Option<(Ipv4Addr, u16)>,
+}
+
+#[cfg(feature = "display-ssd1306")]
+pub static CURRENT_STATUS: Mutex<CriticalSectionRawMutex, DisplayStatus> =
+    Mutex::new(DisplayStatus { address: None });
 
 impl<'a> HttpServer<'a> {
     pub async fn new(ap_stack: Stack<'a>, sta_stack: Stack<'a>, port: u16) -> Self {
@@ -78,6 +90,11 @@ impl<'a> HttpServer<'a> {
             "http-server: running on port {}, STA address is {}",
             self.endpoint.port, self.sta_address
         );
+
+        #[cfg(feature = "display-ssd1306")]
+        {
+            CURRENT_STATUS.lock().await.address = Some((self.sta_address, self.endpoint.port));
+        }
 
         let mut buffer = heapless::Vec::<u8, 1024>::new();
         loop {
