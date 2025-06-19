@@ -15,6 +15,8 @@ pub enum ConfigurationVariable {
     WifiApSsid,
     DnsServer1,
     DnsServer2,
+    InfluxDbHost,
+    InfluxDbPort,
     HtmlFormAction,
 }
 
@@ -29,6 +31,8 @@ impl TryFrom<&[u8]> for ConfigurationVariable {
             b"wifi_ap_ssid" => Ok(ConfigurationVariable::WifiApSsid),
             b"dns_server_1" => Ok(ConfigurationVariable::DnsServer1),
             b"dns_server_2" => Ok(ConfigurationVariable::DnsServer2),
+            b"influx_db_host" => Ok(ConfigurationVariable::InfluxDbHost),
+            b"influx_db_port" => Ok(ConfigurationVariable::InfluxDbPort),
             b"action" => Ok(ConfigurationVariable::HtmlFormAction),
             _ => Err(()),
         }
@@ -111,6 +115,17 @@ font-weight: bold;
     res.write_all_vectored(&[
 br#"<label for="dns_server_2">Secondary DNS server</label>
 <input type="text" name="dns_server_2" placeholder="1.0.0.1" value=""#, ip_str.as_bytes(), br#"" required>
+<label for="influx_db_host">InfluxDB host</label>
+<input type="text" name="influx_db_host" placeholder="host" value=""#, config.influx_db.host.as_deref().unwrap_or("").as_bytes(), br#"">"#,
+    ]).await?;
+
+    ip_str.clear();
+    write!(&mut ip_str, "{}", config.influx_db.port).ok();
+
+    #[rustfmt::skip]
+    res.write_all_vectored(&[
+br#"<label for="influx_db_port">InfluxDB port</label>
+<input type="number" name="influx_db_port" placeholder="8086" value=""#, ip_str.as_bytes(), br#"">
 <button type="submit" name="action" value="apply">Apply</button>
 <button type="submit" name="action" value="save-reboot">Save & Reboot</button>
 </form>
@@ -250,6 +265,26 @@ async fn handle_dashboard_post<'a, 'r>(
                         config.dns_server_2 = ip;
                     }
                     Err(_) => warn!("Invalid DNS server 2 address."),
+                },
+                ConfigurationVariable::InfluxDbHost => {
+                    match heapless::String::<64>::from_str(value_str) {
+                        Ok(s) if s.is_empty() => {
+                            info!("Empty InfluxDB host, clearing config.");
+                            config.influx_db.host = None;
+                        }
+                        Ok(s) => {
+                            info!("Setting InfluxDB host: {}", s);
+                            config.influx_db.host = Some(s);
+                        }
+                        Err(_) => warn!("Invalid InfluxDB host, keeping current value."),
+                    }
+                }
+                ConfigurationVariable::InfluxDbPort => match value_str.parse::<u16>() {
+                    Ok(port) => {
+                        info!("Setting InfluxDB port: {}", port);
+                        config.influx_db.port = port;
+                    }
+                    Err(_) => warn!("Invalid InfluxDB port, keeping current value."),
                 },
                 ConfigurationVariable::HtmlFormAction => match HtmlFormAction::try_from(value) {
                     // browser typically sends this as the last field

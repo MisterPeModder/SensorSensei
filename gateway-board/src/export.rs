@@ -1,6 +1,6 @@
 //! Sensor data exporting
 
-use crate::config::{InfluxDBConfig, CONFIG};
+use crate::config::CONFIG;
 use crate::{
     net::http::{HttpBody, HttpClient, HttpClientError, HttpMethod},
     ValueReceiver,
@@ -19,10 +19,12 @@ pub trait ValuesExporter {
 
 pub struct SensorCommunityExporter;
 
-#[repr(transparent)]
 pub struct InfluxDbExporter {
-    /// InfluxDB configuration
-    cfg: InfluxDBConfig,
+    host: heapless::String<64>,
+    port: u16,
+    org: &'static str,
+    bucket: &'static str,
+    api_token: &'static str,
 }
 
 /// Attempts to fetch as many values as possible from `receiver` until either the buffer is full or the channel is empty.
@@ -63,8 +65,14 @@ pub async fn export_to_all(stack: Stack<'_>, values: &[SensorValuePoint]) {
         error!("export: sensor.community: error: {}", Debug2Format(&e));
     }
     let influx_db_cfg = CONFIG.lock().await.influx_db.clone();
-    if let Some(cfg) = influx_db_cfg {
-        let ex = InfluxDbExporter { cfg };
+    if let Some(host) = influx_db_cfg.host {
+        let ex = InfluxDbExporter {
+            host,
+            port: influx_db_cfg.port,
+            org: influx_db_cfg.org,
+            bucket: influx_db_cfg.bucket,
+            api_token: influx_db_cfg.api_token,
+        };
         if let Err(e) = ex.export(&mut client, values).await {
             error!("export: influxdb: error: {}", Debug2Format(&e));
         }
@@ -215,16 +223,16 @@ impl ValuesExporter for InfluxDbExporter {
         _ = write!(
             &mut buffer,
             "/api/v2/write?org={}&bucket={}&precision=s",
-            self.cfg.org, self.cfg.bucket
+            self.org, self.bucket
         );
 
         let mut req = client
-            .request(HttpMethod::Post, self.cfg.host, self.cfg.port, &buffer)
+            .request(HttpMethod::Post, &self.host, self.port, &buffer)
             .await?;
         req.header("Content-Type", "text/plain").await?;
 
         buffer.clear();
-        _ = write!(&mut buffer, "Token {}", self.cfg.api_token);
+        _ = write!(&mut buffer, "Token {}", self.api_token);
         req.header("Authorization", &buffer).await?;
 
         let mut exported_count: u32 = 0;

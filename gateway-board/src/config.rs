@@ -8,7 +8,7 @@ use esp_hal::rng::Rng;
 use esp_storage::FlashStorage;
 use sha2::{Digest, Sha256};
 
-const CURRENT_CONFIG_VERSION: u8 = 1;
+const CURRENT_CONFIG_VERSION: u8 = 3;
 /// Start of the non-volatile storage (NVS) partition
 const NVS_PARTITION_OFFSET: u32 = 0x9000;
 
@@ -28,7 +28,7 @@ pub struct EnvVariables {
 #[derive(Clone)]
 pub struct InfluxDBConfig {
     /// Host of the InfluxDB instance
-    pub host: &'static str,
+    pub host: Option<heapless::String<64>>,
     /// Port of the InfluxDB instance. Defaults to 8086 if not specified.
     pub port: u16,
     /// Organization name in InfluxDB
@@ -50,8 +50,8 @@ pub struct Config {
     pub dns_server_1: Ipv4Addr,
     /// Secondary DNS server
     pub dns_server_2: Ipv4Addr,
-    /// InfluxDB configuration (optional)
-    pub influx_db: Option<InfluxDBConfig>,
+    /// InfluxDB configuration
+    pub influx_db: InfluxDBConfig,
     /// CSRF token for the configuration dashboard
     pub csrf_token: heapless::String<32>,
 }
@@ -64,7 +64,13 @@ impl Config {
             wifi_ap_ssid: heapless::String::new(),
             dns_server_1: Ipv4Addr::new(0, 0, 0, 0),
             dns_server_2: Ipv4Addr::new(0, 0, 0, 0),
-            influx_db: None,
+            influx_db: InfluxDBConfig {
+                host: None,
+                port: 8086,
+                org: "",
+                bucket: "",
+                api_token: "",
+            },
             csrf_token: heapless::String::new(),
         }
     }
@@ -75,10 +81,22 @@ impl Config {
         config.load_from_env(rng);
         config.load_from_flash();
         config.save_to_flash();
+
+        if let Some(influx_db_host) = &config.influx_db.host {
+            info!(
+                "config: InfluxDB host '{}:{}' with org '{}' and bucket '{}'",
+                influx_db_host,
+                config.influx_db.port,
+                config.influx_db.org,
+                config.influx_db.bucket
+            );
+        } else {
+            warn!("config: InfluxDB is not configured");
+        }
     }
 
     pub fn load_from_env(&mut self, mut rng: Rng) -> &mut Self {
-        info!("Loading configuration from environment variables...");
+        info!("config: loading from environment variables...");
 
         self.wifi_sta_ssid = ENVIRONMENT_VARIABLES.wifi_sta_ssid.and_then(|ssid| {
             heapless::String::<32>::from_str(ssid)
@@ -118,43 +136,31 @@ impl Config {
         // Randomize the CSRF token for security purposes
         self.csrf_token = heapless::String::<32>::new();
         // Generate a random CSRF token from batch of 32bits integers
-        info!("Generating CSRF token...");
+        info!("config: generating CSRF token...");
         for _ in 0..4 {
             // Generate 4 random bytes (32 bits) at a time
             let random_bytes: u32 = rng.random();
             write!(self.csrf_token, "{:08x}", random_bytes).unwrap();
         }
 
-        self.influx_db = match (
-            ENVIRONMENT_VARIABLES.influx_db_host,
-            ENVIRONMENT_VARIABLES.influx_db_api_token,
-            ENVIRONMENT_VARIABLES.influx_db_org,
-            ENVIRONMENT_VARIABLES.influx_db_bucket,
-        ) {
-            (Some(host), Some(api_token), Some(org), Some(bucket)) => {
-                info!(
-                    "InfluxDB configured to host '{}' with org '{}' and bucket '{}'",
-                    host, org, bucket
-                );
-
-                Some(InfluxDBConfig {
-                    host,
-                    port: ENVIRONMENT_VARIABLES
-                        .influx_db_port
-                        .and_then(|p| p.parse().ok())
-                        .unwrap_or(8086),
-                    org,
-                    bucket,
-                    api_token,
-                })
-            }
-            _ => {
-                warn!("InfluxDB is not configured (missing some environment variables).");
-                None
-            }
+        self.influx_db = InfluxDBConfig {
+            host: ENVIRONMENT_VARIABLES
+                .influx_db_host
+                .and_then(|s| heapless::String::<64>::from_str(s).ok()),
+            port: ENVIRONMENT_VARIABLES
+                .influx_db_port
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(8086),
+            org: ENVIRONMENT_VARIABLES.influx_db_org.unwrap_or("my_org"),
+            bucket: ENVIRONMENT_VARIABLES
+                .influx_db_bucket
+                .unwrap_or("my_bucket"),
+            api_token: ENVIRONMENT_VARIABLES
+                .influx_db_api_token
+                .unwrap_or("my_token"),
         };
 
-        info!("Configuration loaded successfully.");
+        info!("config: loaded from environment variables");
         self
     }
 
@@ -172,6 +178,8 @@ impl Config {
                 wifi_ap_ssid: self.wifi_ap_ssid.clone().into(),
                 dns_server_1: self.dns_server_1.into(),
                 dns_server_2: self.dns_server_2.into(),
+                influx_db_host: self.influx_db.host.clone().map(|s| s.into()).into(),
+                influx_db_port: self.influx_db.port,
             },
         };
 
@@ -241,6 +249,10 @@ impl Config {
         }
         self.dns_server_1 = Ipv4Addr::from_bits(payload.dns_server_1);
         self.dns_server_2 = Ipv4Addr::from_bits(payload.dns_server_2);
+        if let Ok(influx_db_host) = payload.influx_db_host.try_decode() {
+            self.influx_db.host = influx_db_host;
+        }
+        self.influx_db.port = payload.influx_db_port;
     }
 }
 
@@ -285,6 +297,8 @@ struct SerializedConfigPayload {
     wifi_ap_ssid: SerializedString<32>,
     dns_server_1: u32,
     dns_server_2: u32,
+    influx_db_host: SerializedOption<SerializedString<64>>,
+    influx_db_port: u16,
 }
 
 #[repr(C, align(1))]
