@@ -173,24 +173,30 @@ async fn do_display(display: &mut GatewayDisplay) -> Result<(), GatewayDisplayEr
 
 #[cfg(feature = "wifi")]
 async fn draw_http_page(display: &mut GatewayDisplay) -> Result<(), GatewayDisplayError> {
-    use core::net::Ipv4Addr;
+    use crate::net::http::DisplayStatus;
 
     display.set_position(0, 2)?;
     write!(display, "* HTTP ")?;
 
     // try to read HTTP server status without blocking
-    let address: Option<(Ipv4Addr, u16)> = {
+    let status: DisplayStatus = {
         crate::net::http::CURRENT_STATUS
             .try_lock()
             .ok()
-            .and_then(|status| status.address)
+            .map(|status| *status)
+            .unwrap_or(DisplayStatus::Initializing)
         // force lock guard to drop after this
     };
 
     display.set_position(0, 3)?;
-    match address {
-        Some((address, port)) => write!(display, "{address:<16}\nport: {port:<10}")?,
-        None => write!(display, "(no address yet)\n                ")?,
+    match status {
+        DisplayStatus::Initializing => write!(display, "initializing... \n                ")?,
+        DisplayStatus::ApOnly(address, port) => {
+            write!(display, "{address:<16}\nport (AP): {port:<5}")?
+        }
+        DisplayStatus::DualStack(address, port) => {
+            write!(display, "{address:<16}\nport: {port:<10}")?
+        }
     }
 
     Ok(())
