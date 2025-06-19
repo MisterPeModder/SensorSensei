@@ -66,15 +66,14 @@ impl Drop for BoxedTcpSocket<'_> {
     }
 }
 
-#[cfg(feature = "tcp-debug")]
 impl<'a> embedded_io_async::ErrorType for BoxedTcpSocket<'a> {
     type Error = <TcpSocket<'a> as embedded_io_async::ErrorType>::Error;
 }
 
-#[cfg(feature = "tcp-debug")]
 impl embedded_io_async::Read for BoxedTcpSocket<'_> {
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
         let res = self.sock.read(buf).await;
+        #[cfg(feature = "tcp-debug")]
         match res {
             Ok(read) => defmt::trace!(
                 "tcp: read() ({=usize} bytes): {=[u8]:a}",
@@ -91,6 +90,7 @@ impl embedded_io_async::Read for BoxedTcpSocket<'_> {
         buf: &mut [u8],
     ) -> Result<(), embedded_io_async::ReadExactError<Self::Error>> {
         let res = self.sock.read_exact(buf).await;
+        #[cfg(feature = "tcp-debug")]
         match res {
             Ok(()) => defmt::trace!(
                 "tcp: read_exact() ({=usize} bytes): {=[u8]:a}",
@@ -103,19 +103,21 @@ impl embedded_io_async::Read for BoxedTcpSocket<'_> {
     }
 }
 
-#[cfg(feature = "tcp-debug")]
 impl embedded_io_async::Write for BoxedTcpSocket<'_> {
     async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        #[cfg(feature = "tcp-debug")]
         defmt::trace!("tcp: write: {=[u8]:a}", buf);
         self.sock.write(buf).await
     }
 
     async fn flush(&mut self) -> Result<(), Self::Error> {
+        #[cfg(feature = "tcp-debug")]
         defmt::trace!("tcp: flush");
         self.sock.flush().await
     }
 
     async fn write_all(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
+        #[cfg(feature = "tcp-debug")]
         defmt::trace!("tcp: write_all: {=[u8]:a}", buf);
         self.sock.write_all(buf).await
     }

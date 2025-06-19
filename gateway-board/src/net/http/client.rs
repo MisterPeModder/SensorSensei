@@ -238,7 +238,7 @@ impl HttpClientResponse {
             .parse()
             .map_err(|_| HttpClientError::InvalidHttpResponse)?;
 
-        while socket.read(&mut buf).await? > 0 {
+        while embedded_io_async::Read::read(&mut socket, &mut buf).await? > 0 {
             // we have the status, consume the rest of the response
         }
 
@@ -249,7 +249,7 @@ impl HttpClientResponse {
         socket: &mut BoxedTcpSocket<'_>,
         buf: &mut [u8],
     ) -> Result<usize, HttpClientError> {
-        let mut filled = socket.read(buf).await?;
+        let mut filled = embedded_io_async::Read::read(socket, buf).await?;
 
         loop {
             match memchr::memchr2(b'\r', b'\n', &buf[..filled]) {
@@ -257,7 +257,7 @@ impl HttpClientResponse {
                     if filled == buf.len() {
                         return Err(HttpClientError::BufferOverflow);
                     }
-                    filled += socket.read(&mut buf[filled..]).await?;
+                    filled += embedded_io_async::Read::read(socket, &mut buf[filled..]).await?;
                 }
                 Some(line_len) => break Ok(line_len),
             }

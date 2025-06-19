@@ -7,7 +7,6 @@ use crate::{
 };
 use defmt::{error, info, Debug2Format};
 use embassy_net::Stack;
-use embassy_time::Instant;
 use protocol::app::v1::{SensorValue, SensorValuePoint};
 
 pub trait ValuesExporter {
@@ -215,7 +214,7 @@ impl ValuesExporter for InfluxDbExporter {
         let mut buffer: heapless::String<100> = heapless::String::new();
         _ = write!(
             &mut buffer,
-            "api/v2/write?org={}&bucket={}&precision=s",
+            "/api/v2/write?org={}&bucket={}&precision=s",
             self.cfg.org, self.cfg.bucket
         );
 
@@ -257,20 +256,18 @@ impl InfluxDbExporter {
         if !first_value {
             body_buf.push(b'\n');
         }
-        let ts = Instant::now().as_millis();
-
         let _ = match value.value {
             SensorValue::Temperature(v) => {
-                write!(body_buf, r#"temperature value={v} {ts}"#)
+                write!(body_buf, r#"temperature value={v}"#)
             }
             SensorValue::Pressure(v) => {
-                write!(body_buf, r#"pressure value={v} {ts}"#)
+                write!(body_buf, r#"pressure value={v}"#)
             }
             SensorValue::Altitude(v) => {
-                write!(body_buf, r#"altitude value={v} {ts}"#)
+                write!(body_buf, r#"altitude value={v}"#)
             }
             SensorValue::AirQuality(v) => {
-                write!(body_buf, r#"dust_density value={v} {ts}"#)
+                write!(body_buf, r#"dust_density value={v}"#)
             }
             SensorValue::Unknown { .. } => Ok(()),
         };
