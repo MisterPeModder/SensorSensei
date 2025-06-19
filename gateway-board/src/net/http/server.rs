@@ -1,7 +1,10 @@
 use super::{HttpMethod, SOCKET_TIMEOUT};
-use crate::net::tcp::BoxedTcpSocket;
+use crate::{
+    net::{tcp::BoxedTcpSocket, GATEWAY_IP},
+    FutureTimeoutExt,
+};
 use core::net::Ipv4Addr;
-use defmt::{debug, error, info, Format};
+use defmt::{debug, error, info, warn, Format};
 use embassy_futures::select::Either;
 use embassy_net::{tcp::TcpSocket, IpListenEndpoint, Stack};
 use embassy_time::{Duration, Timer};
@@ -18,8 +21,7 @@ use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 pub struct HttpServer<'a> {
     endpoint: IpListenEndpoint,
     ap_socket: BoxedTcpSocket<'a>,
-    sta_socket: BoxedTcpSocket<'a>,
-    sta_address: Ipv4Addr,
+    sta_socket: Option<(BoxedTcpSocket<'a>, Ipv4Addr)>,
 }
 
 pub struct HttpServerRequest<'a, 'r> {
@@ -41,40 +43,55 @@ pub enum HttpServerError {
 }
 
 #[cfg(feature = "display-ssd1306")]
-pub struct DisplayStatus {
-    pub address: Option<(Ipv4Addr, u16)>,
+#[derive(Clone, Copy)]
+pub enum DisplayStatus {
+    Initializing,
+    ApOnly(Ipv4Addr, u16),
+    DualStack(Ipv4Addr, u16),
 }
 
 #[cfg(feature = "display-ssd1306")]
 pub static CURRENT_STATUS: Mutex<CriticalSectionRawMutex, DisplayStatus> =
-    Mutex::new(DisplayStatus { address: None });
+    Mutex::new(DisplayStatus::Initializing);
 
 impl<'a> HttpServer<'a> {
     pub async fn new(ap_stack: Stack<'a>, sta_stack: Stack<'a>, port: u16) -> Self {
         info!("http: waiting for AP and STA stacks...");
 
-        let sta_address = loop {
+        let sta_address: Option<Ipv4Addr> = loop {
             if let Some(config) = sta_stack.config_v4() {
-                let address = config.address.address();
-                break address;
+                break Some(config.address.address());
             }
-            sta_stack.wait_config_up().await;
+            if let Err(crate::TimeoutError) = sta_stack
+                .wait_config_up()
+                .with_timeout(Duration::from_secs(20))
+                .await
+            {
+                warn!("http: STA stack failed to configure after 20 seconds, disabling STA mode");
+                break None;
+            }
         };
+
         ap_stack.wait_link_up().await;
-        sta_stack.wait_link_up().await;
+
+        if sta_address.is_some() {
+            sta_stack.wait_link_up().await;
+        }
 
         let endpoint = IpListenEndpoint { addr: None, port };
         let mut ap_socket = BoxedTcpSocket::new(ap_stack).expect("ap_socket: alloc failure");
-        let mut sta_socket = BoxedTcpSocket::new(sta_stack).expect("sta_socket: alloc failure");
+        let sta_socket = sta_address.map(|a| {
+            let mut socket = BoxedTcpSocket::new(sta_stack).expect("sta_socket: alloc failure");
+            socket.set_timeout(Some(SOCKET_TIMEOUT));
+            (socket, a)
+        });
 
         ap_socket.set_timeout(Some(SOCKET_TIMEOUT));
-        sta_socket.set_timeout(Some(SOCKET_TIMEOUT));
 
         HttpServer {
             endpoint,
             ap_socket,
             sta_socket,
-            sta_address,
         }
     }
 
@@ -86,37 +103,47 @@ impl<'a> HttpServer<'a> {
             HttpServerRequest<'a, 'r>,
         ) -> Result<HttpServerResponse<'a, 'r>, HttpServerError>,
     {
-        info!(
-            "http-server: running on port {}, STA address is {}",
-            self.endpoint.port, self.sta_address
-        );
+        match &self.sta_socket {
+            Some((_, sta_address)) => {
+                info!(
+                    "http-server: running dual-stack on port {}, STA address is {}, gateway IP is {}",
+                    self.endpoint.port, sta_address, GATEWAY_IP,
+                );
+            }
+            None => {
+                info!(
+                    "http-server: running single-stack on port {}, gateway IP is {}",
+                    self.endpoint.port, GATEWAY_IP,
+                );
+            }
+        }
 
         #[cfg(feature = "display-ssd1306")]
         {
-            CURRENT_STATUS.lock().await.address = Some((self.sta_address, self.endpoint.port));
+            match &self.sta_socket {
+                Some((_, sta_address)) => {
+                    *CURRENT_STATUS.lock().await =
+                        DisplayStatus::DualStack(*sta_address, self.endpoint.port);
+                }
+                None => {
+                    *CURRENT_STATUS.lock().await =
+                        DisplayStatus::ApOnly(GATEWAY_IP, self.endpoint.port);
+                }
+            }
         }
 
         let mut buffer = heapless::Vec::<u8, 1024>::new();
         loop {
             info!("http-server: waiting for connection");
 
-            let r = embassy_futures::select::select(
-                self.ap_socket.accept(self.endpoint),
-                self.sta_socket.accept(self.endpoint),
-            )
-            .await;
-
-            let sock = match r {
-                Either::First(Ok(())) => &mut self.ap_socket,
-                Either::Second(Ok(())) => &mut self.sta_socket,
-                Either::First(Err(e)) => {
-                    error!("http-server: AP socket error: {:?}", e);
-                    continue;
+            let Some(sock) = (match self.sta_socket {
+                Some((ref mut sta_socket, _)) => {
+                    Self::accept_socket_dual_stack(self.endpoint, &mut self.ap_socket, sta_socket)
+                        .await
                 }
-                Either::Second(Err(e)) => {
-                    error!("http-server: STA socket error: {:?}", e);
-                    continue;
-                }
+                None => Self::accept_socket_single_stack(self.endpoint, &mut self.ap_socket).await,
+            }) else {
+                continue;
             };
 
             match Self::handle_client_request(sock, &mut handler, &mut buffer).await {
@@ -131,6 +158,38 @@ impl<'a> HttpServer<'a> {
             // always terminate connection, regardless of errors
             Self::finish_connection(sock).await;
         }
+    }
+
+    async fn accept_socket_dual_stack<'b>(
+        endpoint: IpListenEndpoint,
+        ap_socket: &'b mut TcpSocket<'a>,
+        sta_socket: &'b mut TcpSocket<'a>,
+    ) -> Option<&'b mut TcpSocket<'a>> {
+        let r = embassy_futures::select::select(
+            ap_socket.accept(endpoint),
+            sta_socket.accept(endpoint),
+        )
+        .await;
+
+        match r {
+            Either::First(Ok(())) => Some(ap_socket),
+            Either::Second(Ok(())) => Some(sta_socket),
+            Either::First(Err(e)) => {
+                error!("http-server: AP socket error: {:?}", e);
+                None
+            }
+            Either::Second(Err(e)) => {
+                error!("http-server: STA socket error: {:?}", e);
+                None
+            }
+        }
+    }
+
+    async fn accept_socket_single_stack<'b>(
+        endpoint: IpListenEndpoint,
+        socket: &'b mut TcpSocket<'a>,
+    ) -> Option<&'b mut TcpSocket<'a>> {
+        socket.accept(endpoint).await.map(|_| socket).ok()
     }
 
     /// Called upon HTTP request to the given socket.

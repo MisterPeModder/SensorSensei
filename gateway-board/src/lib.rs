@@ -27,3 +27,26 @@ pub type ValueSender =
     embassy_sync::zerocopy_channel::Sender<'static, NoopRawMutex, SensorValuePoint>;
 pub type ValueReceiver =
     embassy_sync::zerocopy_channel::Receiver<'static, NoopRawMutex, SensorValuePoint>;
+
+struct TimeoutError;
+
+trait FutureTimeoutExt: core::future::Future {
+    fn with_timeout(
+        self,
+        timeout: embassy_time::Duration,
+    ) -> impl core::future::Future<Output = Result<Self::Output, TimeoutError>>
+    where
+        Self: Sized;
+}
+
+impl<F: core::future::Future> FutureTimeoutExt for F {
+    async fn with_timeout(
+        self,
+        timeout: embassy_time::Duration,
+    ) -> Result<Self::Output, TimeoutError> {
+        match embassy_futures::select::select(self, embassy_time::Timer::after(timeout)).await {
+            embassy_futures::select::Either::First(result) => Ok(result),
+            embassy_futures::select::Either::Second(_) => Err(TimeoutError),
+        }
+    }
+}
